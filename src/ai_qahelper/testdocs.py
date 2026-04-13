@@ -166,8 +166,10 @@ def generate_test_analysis(
         "You MUST apply several test-design techniques where relevant, for example: "
         "equivalence partitioning, boundary value analysis, decision table, pairwise combinations, state/transition "
         "for modes, negative cases. List each applied technique under \"techniques\" with id, name, rationale. "
-        "Under \"test_conditions\" list concrete check conditions with unique COND-xx ids, each linked to a "
-        "technique_id and requirement_ref (quote or section hint from sources). "
+        "Under \"test_conditions\" list concrete check conditions with unique COND-xx ids; "
+        "each condition must be ONE atomic verification (one field, one rule, or one boundary value — "
+        "do not bundle several unrelated checks into a single COND). Each linked to a technique_id and "
+        "requirement_ref (quote or section hint from sources). "
         "Use consistency findings to populate risks_and_gaps (ambiguity, missing design coverage, contradictions)."
     )
     user = (
@@ -223,18 +225,23 @@ def generate_test_cases(
         "Put the stand URL in preconditions if needed (e.g. «Открыть сервис … [URL]»). "
         "steps: each array item is exactly one action, in execution order; do NOT prefix with \"1.\" or \"2.\" — "
         "numbering is added when exporting to CSV/Excel. "
-        "Steps must be concrete and executable (имена полей, значения, ожидаемые сообщения на русском)."
+        "Steps must be concrete and executable (имена полей, значения, ожидаемые сообщения на русском). "
+        "ATOMICITY (обязательно): один тест-кейс = одна проверка / одно ожидаемое поведение. "
+        "Не объединяй в одном кейсе несколько граничных значений, разных полей или разных сообщений об ошибке — "
+        "разносите на отдельные case_id. В expected_result — ровно один согласованный итог для этого кейса. "
+        "Обычно 2–5 шагов: довести систему до точки проверки и зафиксировать результат."
     )
     if analysis is not None and analysis.test_conditions:
         system += (
-            " A test analysis with test_conditions (COND-xx) was provided. Each test case MUST reference at least one "
-            "condition id: include every applicable COND-xx in source_refs AND start the note field with "
-            "\"Условия: COND-01, COND-02\" (example) listing those ids. Prefer covering diverse techniques from the "
-            "analysis; do not duplicate the same condition across all cases if others exist."
+            " A test analysis with test_conditions (COND-xx) was provided. Each test case MUST reference exactly one "
+            "primary condition in source_refs (the main COND-xx this case verifies) AND start the note field with "
+            "\"Условия: COND-xx\" for that id. Prefer 1:1 mapping: one atomic case per condition when max_cases allows; "
+            "cover diverse techniques from the analysis without merging multiple COND into one test case."
         )
 
     user_parts = [
         f"Сгенерируй ровно {max_cases} различных тест-кейсов (не меньше и не больше).",
+        "Каждый кейс проверяет ровно одну вещь (одно значение, одно правило, одно сообщение) — не склеивай проверки.",
         "Все формулировки для исполнителя — на русском языке.",
         "Поля environment, status и bug_report_id оставь пустыми строками \"\" (шаблон под ручное заполнение).",
         "URL стенда при необходимости укажи в предусловиях, не в environment.",

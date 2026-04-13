@@ -33,6 +33,14 @@ def format_steps_for_export(steps: list[str]) -> str:
     return "\n".join(lines)
 
 
+def flatten_cell_for_csv(value: str) -> str:
+    """Одна физическая строка в CSV: переносы заменяются на разделитель (удобно в блокноте и в Excel RU)."""
+    if not value:
+        return ""
+    t = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return " | ".join(line.strip() for line in t.split("\n") if line.strip())
+
+
 def save_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -72,9 +80,13 @@ def export_test_cases_local(
     xlsx_path = base_dir / "test-cases.xlsx"
     cols = columns if columns else default_test_case_export_columns()
     headers = [c.header for c in cols]
-    rows = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
-    _write_csv(csv_path, rows, fieldnames=headers)
-    pd.DataFrame(rows, columns=headers).to_excel(xlsx_path, index=False)
+    rows_xlsx = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
+    rows_csv = [
+        {h: flatten_cell_for_csv(row[h]) for h in headers}
+        for row in rows_xlsx
+    ]
+    _write_csv(csv_path, rows_csv, fieldnames=headers, excel_csv_sep_hint=True)
+    pd.DataFrame(rows_xlsx, columns=headers).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 
@@ -132,11 +144,20 @@ def export_manual_results_local(base_dir: Path, results: list[ManualExecutionRes
     return path
 
 
-def _write_csv(path: Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
+def _write_csv(
+    path: Path,
+    rows: list[dict],
+    fieldnames: list[str] | None = None,
+    *,
+    excel_csv_sep_hint: bool = False,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = fieldnames if fieldnames is not None else (list(rows[0].keys()) if rows else [])
-    # utf-8-sig: Excel на Windows корректно открывает кириллицу; QUOTE_MINIMAL — кавычки у полей с переносами строк.
+    # utf-8-sig: Excel на Windows корректно открывает кириллицу; QUOTE_MINIMAL — кавычки при запятых/кавычках в поле.
+    # Первая строка sep=, подсказывает Excel (в т.ч. русская локаль) разделитель «запятая».
     with path.open("w", newline="", encoding="utf-8-sig") as f:
+        if excel_csv_sep_hint:
+            f.write("sep=,\n")
         writer = csv.DictWriter(
             f,
             fieldnames=keys,
