@@ -59,15 +59,18 @@ def generate_test_cases(
         "The JSON must have exactly one top-level key: \"test_cases\" (array of objects). "
         "Each object uses keys: case_id, title, preconditions, steps (array of strings), expected_result, "
         "environment, status, bug_report_id, note, source_refs (array of strings). "
-        "Write titles, preconditions, steps, expected results, and notes in Russian when requirements are in Russian. "
-        "Steps must be concrete and executable (field names, values, expected messages)."
+        "LANGUAGE: All human-readable fields MUST be in Russian: title, preconditions, every step string, "
+        "expected_result, note. Use Russian UI strings from requirements (кнопки, подписи полей, тексты ошибок). "
+        "Only case_id may stay Latin like TC-001; environment may be the URL or a short Russian label plus URL. "
+        "Steps must be concrete and executable (имена полей, значения, ожидаемые сообщения на русском)."
     )
     user = (
-        f"Generate exactly {max_cases} distinct, high-value test cases (not fewer, not more), "
-        "covering validation, main flows, and edge cases where possible.\n"
+        f"Сгенерируй ровно {max_cases} различных тест-кейсов (не меньше и не больше), "
+        "покрывающих валидацию, основные сценарии и граничные случаи по возможности.\n"
+        "Все формулировки для исполнителя — на русском языке.\n"
         "Set status to \"draft\" and bug_report_id to \"\" for every case.\n"
-        "environment should be the target app base URL when relevant.\n"
-        "source_refs must cite requirement source paths or section hints from the unified model.\n"
+        "environment: укажи базовый URL стенда или строку вида «Стенд: <URL>».\n"
+        "source_refs: пути к источникам или намёк на раздел из unified model.\n"
         f"Consistency (subset):\n{_consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)}\n"
         f"Unified model:\n{_model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source)}"
     )
@@ -86,11 +89,11 @@ def generate_bug_report_templates(
     system = (
         "You are QA lead. Reply with a single JSON object only — no markdown. "
         "Top-level key must be \"bug_reports\" (array). "
-        "Use Russian for titles and narrative fields when test cases are in Russian."
+        "All narrative fields (title, preconditions, steps, actual_result, expected_result) MUST be in Russian."
     )
     user = (
-        f"Generate up to {max_items} plausible bug draft templates from these test cases. "
-        "Do not invent impossible flows.\n"
+        f"Сгенерируй до {max_items} правдоподобных черновиков баг-репортов по этим тест-кейсам. "
+        "Не придумывай невозможные сценарии. Всё на русском.\n"
         f"{json.dumps([c.model_dump() for c in test_cases], ensure_ascii=False)}"
     )
     payload = llm.complete_json(system, user, Payload, root_list_key="bug_reports")
@@ -100,9 +103,9 @@ def generate_bug_report_templates(
 def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> list[TestCase]:
     items: list[TestCase] = []
     base_steps = [
-        f"Open URL {model.target_url}",
-        "Verify page loads without errors",
-        "Verify key UI elements are visible based on requirements",
+        f"Открыть в браузере URL: {model.target_url}",
+        "Убедиться, что страница загрузилась без ошибок",
+        "Проверить по требованиям видимость ключевых элементов интерфейса",
     ]
     cap = max(1, min(max_cases, 50))
     for i, req in enumerate(model.requirements[:cap], start=1):
@@ -113,14 +116,14 @@ def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> 
         items.append(
             TestCase(
                 case_id=f"TC-{i:03d}",
-                title=f"Requirement coverage: {req.source}",
-                preconditions="Application is available",
-                steps=base_steps + [f"Validate requirement text fragment: {req.content[:120]}"],
-                expected_result="Requirement behavior is implemented as expected",
+                title=f"Покрытие требований: {req.source}",
+                preconditions="Приложение доступно, пользователь на странице сервиса",
+                steps=base_steps + [f"Сверить фрагмент требований: {req.content[:120]}"],
+                expected_result="Поведение соответствует описанным требованиям",
                 environment=str(model.target_url),
                 status="draft",
                 bug_report_id="",
-                note="Fallback case generated without LLM response",
+                note="Черновик без ответа LLM (резервный режим)",
                 source_refs=refs,
             )
         )
