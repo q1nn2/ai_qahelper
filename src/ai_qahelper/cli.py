@@ -43,8 +43,14 @@ def ingest_cmd(
 
 
 @app.command("generate-docs")
-def generate_docs_cmd(session_id: str) -> None:
-    state = generate_docs(session_id)
+def generate_docs_cmd(
+    session_id: str,
+    max_cases: Annotated[
+        int | None,
+        typer.Option(help="Number of test cases to generate; overrides llm.max_test_cases in config"),
+    ] = None,
+) -> None:
+    state = generate_docs(session_id, max_cases=max_cases)
     print({"session_id": state.session_id, "test_cases_path": state.test_cases_path, "bug_reports_path": state.bug_reports_path})
 
 
@@ -100,8 +106,19 @@ def agent_run_cmd(
     figma_file_key: Annotated[str | None, typer.Option(help="Figma file key (optional; omit if design is only in Cursor/MCP)")] = None,
     target_url: Annotated[str | None, typer.Option(help="Target web app URL")] = None,
     out_dir: Annotated[str | None, typer.Option(help="Optional output directory for summary file")] = None,
+    max_cases: Annotated[
+        int | None,
+        typer.Option(help="How many test cases to generate; overrides llm.max_test_cases in config"),
+    ] = None,
 ) -> None:
-    payload = agent_run(requirements, requirement_url, figma_file_key, target_url=target_url, out_dir=out_dir)
+    payload = agent_run(
+        requirements,
+        requirement_url,
+        figma_file_key,
+        target_url=target_url,
+        out_dir=out_dir,
+        max_cases=max_cases,
+    )
     print(payload)
 
 

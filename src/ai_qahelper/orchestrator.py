@@ -98,7 +98,7 @@ def ingest(requirements: list[str], requirement_urls: list[str], figma_file_key:
     return session_id
 
 
-def generate_docs(session_id: str) -> SessionState:
+def generate_docs(session_id: str, max_cases: int | None = None) -> SessionState:
     cfg = load_config()
     state = _load_session(session_id)
     session_dir = _session_path(session_id)
@@ -109,16 +109,25 @@ def generate_docs(session_id: str) -> SessionState:
     consistency_json = session_dir / "consistency-report.json"
     save_json(consistency_json, consistency)
 
+    n_cases = max_cases if max_cases is not None else cfg.llm.max_test_cases
+    n_cases = max(1, min(n_cases, 100))
+
     err_path = session_dir / "llm-generation-errors.log"
     try:
         test_cases = _retry(
             2,
-            lambda: generate_test_cases(llm, unified, consistency_report=consistency, llm_cfg=cfg.llm),
+            lambda: generate_test_cases(
+                llm,
+                unified,
+                consistency_report=consistency,
+                max_cases=n_cases,
+                llm_cfg=cfg.llm,
+            ),
         )
     except Exception as exc:
         logger.exception("generate_test_cases failed, using fallback")
         err_path.write_text(f"generate_test_cases:\n{type(exc).__name__}: {exc}\n", encoding="utf-8")
-        test_cases = fallback_test_cases(unified)
+        test_cases = fallback_test_cases(unified, max_cases=n_cases)
     bug_templates: list[BugReport]
     try:
         bug_templates = _retry(2, lambda: generate_bug_report_templates(llm, test_cases))
@@ -148,10 +157,11 @@ def agent_run(
     figma_file_key: str | None = None,
     target_url: str | None = None,
     out_dir: str | None = None,
+    max_cases: int | None = None,
 ) -> dict:
     target = target_url or "https://example.com"
     session_id = ingest(requirements, requirement_urls, figma_file_key, target)
-    state = generate_docs(session_id)
+    state = generate_docs(session_id, max_cases=max_cases)
     consistency = (
         json.loads(Path(state.consistency_report_path).read_text(encoding="utf-8"))
         if state.consistency_report_path

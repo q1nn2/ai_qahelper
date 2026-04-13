@@ -28,7 +28,7 @@ playwright install chromium
    copy ai-tester.config.example.yaml ai-tester.config.yaml
    ```
 
-2. В `ai-tester.config.yaml` задайте модель и список разрешённых окружений (`envs`). Если `envs` пустой, проверка `target_url` отключена.
+2. В `ai-tester.config.yaml` задайте модель, при необходимости `llm.max_test_cases` (сколько тест-кейсов запрашивать у модели), и список разрешённых окружений (`envs`). Если `envs` пустой, проверка `target_url` отключена.
 
 3. Ключ OpenAI: либо переменная окружения `OPENAI_API_KEY`, либо в **только локальном** `ai-tester.config.yaml` поле `llm.api_key: "sk-..."`. В `ai-tester.config.example.yaml` и в git секреты не кладутся. Поле `api_key_env` в YAML — это **имя** переменной окружения, а не сам ключ.
 
@@ -55,6 +55,8 @@ ai-qahelper generate-docs <session_id>
 
 ```bash
 ai-qahelper agent-run --requirement tests/ai-docs/requirements.md --target-url https://example.com
+# явно указать число кейсов (перекрывает llm.max_test_cases в конфиге):
+ai-qahelper agent-run --requirement tests/ai-docs/requirements.md --target-url https://example.com --max-cases 5
 ```
 
 С URL требований и Figma (ключ файла из URL макета `figma.com/file/<KEY>/...`):

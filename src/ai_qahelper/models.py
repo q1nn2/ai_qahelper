@@ -23,6 +23,7 @@ class LlmConfig(BaseModel):
     max_output_tokens: int = 16384
     max_requirement_chars_per_source: int = 52000
     max_consistency_findings: int = 40
+    max_test_cases: int = 30
 
 
 class AppConfig(BaseModel):

@@ -63,7 +63,8 @@ def generate_test_cases(
         "Steps must be concrete and executable (field names, values, expected messages)."
     )
     user = (
-        f"Generate up to {max_cases} distinct, high-value test cases covering validation, main flows, and edge cases.\n"
+        f"Generate exactly {max_cases} distinct, high-value test cases (not fewer, not more), "
+        "covering validation, main flows, and edge cases where possible.\n"
         "Set status to \"draft\" and bug_report_id to \"\" for every case.\n"
         "environment should be the target app base URL when relevant.\n"
         "source_refs must cite requirement source paths or section hints from the unified model.\n"
@@ -71,7 +72,7 @@ def generate_test_cases(
         f"Unified model:\n{_model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source)}"
     )
     payload = llm.complete_json(system, user, Payload, root_list_key="test_cases")
-    return payload.test_cases
+    return payload.test_cases[:max_cases]
 
 
 def generate_bug_report_templates(
@@ -96,14 +97,15 @@ def generate_bug_report_templates(
     return payload.bug_reports
 
 
-def fallback_test_cases(model: UnifiedRequirementModel) -> list[TestCase]:
+def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> list[TestCase]:
     items: list[TestCase] = []
     base_steps = [
         f"Open URL {model.target_url}",
         "Verify page loads without errors",
         "Verify key UI elements are visible based on requirements",
     ]
-    for i, req in enumerate(model.requirements[:10], start=1):
+    cap = max(1, min(max_cases, 50))
+    for i, req in enumerate(model.requirements[:cap], start=1):
         figma_ref = f"figma:{model.design.file_key}" if model.design else None
         refs = [req.source]
         if figma_ref:
