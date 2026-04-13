@@ -12,10 +12,9 @@ llm:
 docs_dir: "tests/ai-docs"
 sessions_dir: "tests/ai-sessions"
 
-# Список разрешённых окружений: target_url при ingest должен совпадать по host с одним из base_url.
-# Оставьте пустым envs: [], чтобы отключить проверку (любой target_url).
-envs:
-  - name: "staging"
-    base_url: "https://example.com"
-  # - name: "local"
-  #   base_url: "http://localhost:3000"
+# Разрешённые окружения: host из --target-url должен совпадать с host у одного из base_url.
+# Пустой список = проверка отключена, любой target_url.
+envs: []
+# envs:
+#   - name: "qa-routes"
+#     base_url: "https://qa-routes.praktikum-services.ru"
