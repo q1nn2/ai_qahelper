@@ -1,0 +1,18 @@
+# Скопируйте в ai-tester.config.yaml и поправьте под проект.
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4.1-mini"
+  api_key_env: "OPENAI_API_KEY"
+  temperature: 0.2
+
+docs_dir: "tests/ai-docs"
+sessions_dir: "tests/ai-sessions"
+
+# Список разрешённых окружений: target_url при ingest должен совпадать по host с одним из base_url.
+# Оставьте пустым envs: [], чтобы отключить проверку (любой target_url).
+envs:
+  - name: "staging"
+    base_url: "https://example.com"
+  # - name: "local"
+  #   base_url: "http://localhost:3000"
