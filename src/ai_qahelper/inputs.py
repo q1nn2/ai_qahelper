@@ -13,6 +13,12 @@ def parse_requirements(paths: list[str]) -> list[RequirementItem]:
     items: list[RequirementItem] = []
     for path in paths:
         p = Path(path)
+        if not p.is_file():
+            resolved = p.resolve()
+            raise FileNotFoundError(
+                f"Requirement file not found: {path!r} (resolved: {resolved}, cwd: {Path.cwd()}). "
+                "Check the path and filename (on Windows avoid accidental .pdf.pdf if extensions are hidden)."
+            )
         content = _read_requirement_file(p)
         items.append(RequirementItem(source=str(p), content=content))
     return items
