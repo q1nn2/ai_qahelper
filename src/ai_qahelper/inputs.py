@@ -6,11 +6,17 @@ from pathlib import Path
 import httpx
 from pypdf import PdfReader
 
-from ai_qahelper.models import DesignModel, DesignNode, RequirementItem
+from ai_qahelper.llm_client import LlmClient
+from ai_qahelper.models import AppConfig, DesignModel, DesignNode, RequirementItem
+from ai_qahelper.pdf_vision import build_pdf_requirement_content
 
 
-def parse_requirements(paths: list[str]) -> list[RequirementItem]:
+def parse_requirements(paths: list[str], app_cfg: AppConfig | None = None) -> list[RequirementItem]:
     items: list[RequirementItem] = []
+    llm: LlmClient | None = None
+    if app_cfg and app_cfg.pdf_vision and any(Path(p).suffix.lower() == ".pdf" for p in paths):
+        llm = LlmClient(app_cfg.llm)
+
     for path in paths:
         p = Path(path)
         if not p.is_file():
@@ -19,7 +25,15 @@ def parse_requirements(paths: list[str]) -> list[RequirementItem]:
                 f"Requirement file not found: {path!r} (resolved: {resolved}, cwd: {Path.cwd()}). "
                 "Check the path and filename (on Windows avoid accidental .pdf.pdf if extensions are hidden)."
             )
-        content = _read_requirement_file(p)
+        if p.suffix.lower() == ".pdf" and app_cfg is not None and llm is not None:
+            content = build_pdf_requirement_content(
+                p,
+                llm,
+                app_cfg.llm,
+                pdf_vision=app_cfg.pdf_vision,
+            )
+        else:
+            content = _read_requirement_file(p)
         items.append(RequirementItem(source=str(p), content=content))
     return items
 

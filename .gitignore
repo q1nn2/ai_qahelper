@@ -1,3 +1,9 @@
+# Локальные секреты: не коммитить ключи OpenAI и локальный конфиг.
+.env
+.env.*
+*.local.yaml
+ai-tester.config.yaml
+
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -6,10 +12,6 @@ dist/
 build/
 .venv/
 venv/
-.env
-.env.*
-*.local.yaml
-ai-tester.config.yaml
 tests/ai-sessions/
 generated_tests/
 .pytest_cache/

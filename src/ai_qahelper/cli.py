@@ -49,9 +49,31 @@ def generate_docs_cmd(
         int | None,
         typer.Option(help="Number of test cases to generate; overrides llm.max_test_cases in config"),
     ] = None,
+    with_bug_drafts: Annotated[
+        bool,
+        typer.Option("--with-bug-drafts", help="Дополнительно сгенерировать черновики баг-репортов (LLM)."),
+    ] = False,
+    skip_test_analysis: Annotated[
+        bool,
+        typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (один запрос вместо двух)."),
+    ] = False,
 ) -> None:
-    state = generate_docs(session_id, max_cases=max_cases)
-    print({"session_id": state.session_id, "test_cases_path": state.test_cases_path, "bug_reports_path": state.bug_reports_path})
+    bug_arg = True if with_bug_drafts else None
+    skip_a = True if skip_test_analysis else None
+    state = generate_docs(
+        session_id,
+        max_cases=max_cases,
+        generate_bug_templates=bug_arg,
+        skip_test_analysis=skip_a,
+    )
+    print(
+        {
+            "session_id": state.session_id,
+            "test_analysis_path": state.test_analysis_path,
+            "test_cases_path": state.test_cases_path,
+            "bug_reports_path": state.bug_reports_path,
+        }
+    )
 
 
 @app.command("run-manual")
@@ -110,6 +132,14 @@ def agent_run_cmd(
         int | None,
         typer.Option(help="How many test cases to generate; overrides llm.max_test_cases in config"),
     ] = None,
+    with_bug_drafts: Annotated[
+        bool,
+        typer.Option("--with-bug-drafts", help="Дополнительно сгенерировать черновики баг-репортов (LLM)."),
+    ] = False,
+    skip_test_analysis: Annotated[
+        bool,
+        typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (быстрее, один запрос на кейсы)."),
+    ] = False,
 ) -> None:
     payload = agent_run(
         requirements,
@@ -118,6 +148,8 @@ def agent_run_cmd(
         target_url=target_url,
         out_dir=out_dir,
         max_cases=max_cases,
+        with_bug_drafts=with_bug_drafts,
+        skip_test_analysis=True if skip_test_analysis else None,
     )
     print(payload)
 

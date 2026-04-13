@@ -9,7 +9,10 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
-from ai_qahelper.models import BugReport, ManualExecutionResult, TestCase
+from ai_qahelper.models import BugReport, ManualExecutionResult, TestCase, TestCaseExportColumn
+
+# В выгрузке таблицы эти поля всегда пустые — их заполняет исполнитель (как в шаблоне TestRail/Excel).
+_EXPORT_BLANK_EXECUTOR_FIELDS = frozenset({"environment", "status", "bug_report_id"})
 
 
 def save_json(path: Path, payload: object) -> None:
@@ -17,27 +20,58 @@ def save_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def export_test_cases_local(base_dir: Path, test_cases: list[TestCase]) -> tuple[Path, Path]:
+def default_test_case_export_columns() -> list[TestCaseExportColumn]:
+    return [
+        TestCaseExportColumn(field="case_id", header="ID"),
+        TestCaseExportColumn(field="title", header="Название тест-кейса"),
+        TestCaseExportColumn(field="preconditions", header="Предусловия"),
+        TestCaseExportColumn(field="steps", header="Описание шагов"),
+        TestCaseExportColumn(field="expected_result", header="Ожидаемый результат"),
+        TestCaseExportColumn(field="environment", header="Окружение"),
+        TestCaseExportColumn(field="status", header="Статус"),
+        TestCaseExportColumn(field="bug_report_id", header="ID баг-репорта"),
+        TestCaseExportColumn(field="note", header="Примечание"),
+    ]
+
+
+def _test_case_cell(test_case: TestCase, field: str) -> str:
+    if field in _EXPORT_BLANK_EXECUTOR_FIELDS:
+        return ""
+    if field == "steps":
+        return "\n".join(test_case.steps)
+    if field == "source_refs":
+        return "; ".join(test_case.source_refs)
+    return str(getattr(test_case, field))
+
+
+def export_test_cases_local(
+    base_dir: Path,
+    test_cases: list[TestCase],
+    columns: list[TestCaseExportColumn] | None = None,
+) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
     csv_path = base_dir / "test-cases.csv"
     xlsx_path = base_dir / "test-cases.xlsx"
-    rows = [
-        {
-            "ID": c.case_id,
-            "Название тест-кейса": c.title,
-            "Предусловия": c.preconditions,
-            "Описание шагов": "\n".join(c.steps),
-            "Ожидаемый результат": c.expected_result,
-            "Окружение": c.environment,
-            "Статус": c.status,
-            "ID баг-репорта": c.bug_report_id,
-            "Примечание": c.note,
-        }
-        for c in test_cases
-    ]
-    _write_csv(csv_path, rows)
-    pd.DataFrame(rows).to_excel(xlsx_path, index=False)
+    cols = columns if columns else default_test_case_export_columns()
+    headers = [c.header for c in cols]
+    rows = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
+    _write_csv(csv_path, rows, fieldnames=headers)
+    pd.DataFrame(rows, columns=headers).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
+
+
+_BUG_EXPORT_KEYS = [
+    "bug_id",
+    "title",
+    "severity",
+    "priority",
+    "preconditions",
+    "steps",
+    "actual_result",
+    "expected_result",
+    "attachments",
+    "linked_test_case_id",
+]
 
 
 def export_bug_reports_local(base_dir: Path, bug_reports: list[BugReport]) -> tuple[Path, Path]:
@@ -59,13 +93,14 @@ def export_bug_reports_local(base_dir: Path, bug_reports: list[BugReport]) -> tu
         }
         for b in bug_reports
     ]
-    _write_csv(csv_path, rows)
-    pd.DataFrame(rows).to_excel(xlsx_path, index=False)
+    _write_csv(csv_path, rows, fieldnames=_BUG_EXPORT_KEYS)
+    pd.DataFrame(rows, columns=_BUG_EXPORT_KEYS).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 
 def export_manual_results_local(base_dir: Path, results: list[ManualExecutionResult]) -> Path:
     path = base_dir / "manual-results.csv"
+    keys = ["test_case_id", "status", "notes", "evidence_files"]
     rows = [
         {
             "test_case_id": r.test_case_id,
@@ -75,15 +110,15 @@ def export_manual_results_local(base_dir: Path, results: list[ManualExecutionRes
         }
         for r in results
     ]
-    _write_csv(path, rows)
+    _write_csv(path, rows, fieldnames=keys)
     return path
 
 
-def _write_csv(path: Path, rows: list[dict]) -> None:
+def _write_csv(path: Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    keys = list(rows[0].keys()) if rows else []
+    keys = fieldnames if fieldnames is not None else (list(rows[0].keys()) if rows else [])
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=keys)
+        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -114,9 +149,9 @@ def sync_test_cases_to_sheet(spreadsheet_id: str, worksheet_gid: str, test_cases
             c.preconditions,
             "\n".join(c.steps),
             c.expected_result,
-            c.environment,
-            c.status,
-            c.bug_report_id,
+            "",
+            "",
+            "",
             c.note,
         ]
         for c in test_cases
