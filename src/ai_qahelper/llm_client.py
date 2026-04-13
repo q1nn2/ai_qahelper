@@ -55,7 +55,8 @@ class LlmClient:
             raise RuntimeError(
                 f"Missing API key: set llm.api_key in ai-tester.config.yaml or env var {config.api_key_env}"
             )
-        self._client = OpenAI(base_url=config.base_url, api_key=api_key)
+        timeout = float(config.request_timeout_seconds)
+        self._client = OpenAI(base_url=config.base_url, api_key=api_key, timeout=timeout)
         self._model = config.model
         self._temperature = config.temperature
         self._max_output_tokens = config.max_output_tokens
@@ -79,6 +80,11 @@ class LlmClient:
         if self._max_output_tokens > 0:
             kwargs["max_output_tokens"] = self._max_output_tokens
 
+        logger.info(
+            "OpenAI responses.create: model=%s timeout=%ss",
+            self._model,
+            getattr(self._client, "timeout", "?"),
+        )
         try:
             response = self._client.responses.create(**kwargs)
         except APIError as err:

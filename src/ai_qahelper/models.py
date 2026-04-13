@@ -24,6 +24,8 @@ class LlmConfig(BaseModel):
     max_requirement_chars_per_source: int = 52000
     max_consistency_findings: int = 40
     max_test_cases: int = 30
+    # Секунды на один HTTP-запрос к API (иначе при сбое сети процесс может «висеть» очень долго).
+    request_timeout_seconds: float = 600.0
 
 
 class AppConfig(BaseModel):
