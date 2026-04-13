@@ -29,8 +29,8 @@ def _extract_json_text(raw: str) -> str:
     if start_obj == -1 and start_arr == -1:
         return text
     if start_arr != -1 and (start_obj == -1 or start_arr < start_obj):
-        return text[start_arr: text.rfind("]") + 1]
-    return text[start_obj: text.rfind("}") + 1]
+        return text[start_arr : text.rfind("]") + 1]
+    return text[start_obj : text.rfind("}") + 1]
 
 
 def _parse_json_payload(text: str) -> Any:
@@ -81,7 +81,7 @@ class LlmClient:
             kwargs["max_output_tokens"] = self._max_output_tokens
 
         logger.info(
-            "OpenAI responses.create: model=%s timeout=%ss",
+            "OpenAI responses.create: model=%s timeout=%s",
             self._model,
             getattr(self._client, "timeout", "?"),
         )
@@ -94,6 +94,7 @@ class LlmClient:
                 response = self._client.responses.create(**kwargs)
             else:
                 raise
+
         text = response.output_text
         if not (text and text.strip()):
             raise RuntimeError("Empty model response (output_text)")
