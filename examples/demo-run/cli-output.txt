@@ -1,0 +1,26 @@
+# Пример вывода после успешного agent-run (один запрос к LLM при --skip-test-analysis)
+
+$ python -m ai_qahelper.cli agent-run ^
+  --requirement examples/minimal/requirements.md ^
+  --target-url https://qa-routes.praktikum-services.ru ^
+  --max-cases 3 ^
+  --skip-test-analysis ^
+  -L demo-readme
+
+2026-04-13 ... INFO ai_qahelper.llm_client OpenAI responses.create: model=gpt-4.1-mini ...
+2026-04-13 ... INFO httpx HTTP Request: POST https://api.openai.com/v1/responses "HTTP/1.1 200 OK"
+
+{
+    'session_id': '2026-04-13_16-16-40_demo-readme_8f4759',
+    'unified_model_path': 'runs\\2026-04-13_16-16-40_demo-readme_8f4759\\unified-model.json',
+    'consistency_report_path': 'runs\\2026-04-13_16-16-40_demo-readme_8f4759\\consistency-report.json',
+    'test_analysis_path': None,
+    'test_cases_path': 'runs\\2026-04-13_16-16-40_demo-readme_8f4759\\test-cases.json',
+    'bug_reports_path': 'runs\\2026-04-13_16-16-40_demo-readme_8f4759\\bug-reports.json',
+    'summary': {
+        'missing': 0,
+        'contradiction': 0,
+        'ambiguity': 6,
+        'test_cases': 3
+    }
+}

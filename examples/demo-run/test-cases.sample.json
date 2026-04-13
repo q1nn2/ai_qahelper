@@ -1,0 +1,55 @@
+[
+  {
+    "case_id": "TC-001",
+    "title": "Проверка обязательного поля «Email» при входе",
+    "preconditions": "Открыть форму входа по адресу https://qa-routes.praktikum-services.ru/",
+    "steps": [
+      "Оставить поле «Email» пустым",
+      "Ввести в поле «Пароль» любой текст",
+      "Нажать кнопку «Войти»"
+    ],
+    "expected_result": "Отображается сообщение об ошибке «Поле Email обязательно»",
+    "environment": "",
+    "status": "",
+    "bug_report_id": "",
+    "note": "Проверяется валидация обязательного поля Email",
+    "source_refs": [
+      "examples\\minimal\\requirements.md#Форма входа"
+    ]
+  },
+  {
+    "case_id": "TC-002",
+    "title": "Проверка неактивности кнопки «Войти» при пустом поле «Пароль»",
+    "preconditions": "Открыть форму входа по адресу https://qa-routes.praktikum-services.ru/",
+    "steps": [
+      "Ввести в поле «Email» валидный email адрес",
+      "Оставить поле «Пароль» пустым"
+    ],
+    "expected_result": "Кнопка «Войти» неактивна и не реагирует на нажатия",
+    "environment": "",
+    "status": "",
+    "bug_report_id": "",
+    "note": "Проверяется блокировка кнопки при отсутствии пароля",
+    "source_refs": [
+      "examples\\minimal\\requirements.md#Форма входа"
+    ]
+  },
+  {
+    "case_id": "TC-003",
+    "title": "Успешный вход при вводе валидных данных",
+    "preconditions": "Открыть форму входа по адресу https://qa-routes.praktikum-services.ru/",
+    "steps": [
+      "Ввести в поле «Email» валидный email адрес",
+      "Ввести в поле «Пароль» корректный пароль",
+      "Нажать кнопку «Войти»"
+    ],
+    "expected_result": "Пользователь успешно переходит в личный кабинет",
+    "environment": "",
+    "status": "",
+    "bug_report_id": "",
+    "note": "Проверяется успешная авторизация с валидными данными",
+    "source_refs": [
+      "examples\\minimal\\requirements.md#Форма входа"
+    ]
+  }
+]

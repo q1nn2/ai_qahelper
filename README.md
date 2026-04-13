@@ -6,6 +6,14 @@
 
 **Подходит для:** manual QA, QA automation, AI-assisted test design, команд, которым нужно ускорить подготовку тестов перед спринтом или релизом.
 
+## Демо
+
+Реальный прогон `agent-run` по [`examples/minimal/requirements.md`](examples/minimal/requirements.md): в репозитории зафиксированы [вывод CLI, sample JSON и скрин](examples/demo-run/README.md).
+
+![Пример вывода agent-run в терминале](examples/demo-run/demo-agent-run.png)
+
+*Визуализация терминала; session_id и сводка совпадают с записанным прогоном в [`examples/demo-run/`](examples/demo-run/). Записать свой GIF: [asciinema](https://asciinema.org/) или встроенная запись экрана Windows (Win+G).*
+
 ## Возможности
 
 - Сбор требований из `.md`, `.txt`, `.pdf` и URL
