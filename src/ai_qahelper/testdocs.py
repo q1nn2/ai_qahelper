@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.models import (
     AnalysisTechnique,
-    AnalysisTestCondition,
     BugReport,
     LlmConfig,
     TestAnalysisReport,

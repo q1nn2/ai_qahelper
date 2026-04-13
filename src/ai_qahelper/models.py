@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
-import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
@@ -94,8 +94,9 @@ class LlmConfig(BaseModel):
 
 class AppConfig(BaseModel):
     llm: LlmConfig
-    docs_dir: str = "tests/ai-docs"
-    sessions_dir: str = "tests/ai-sessions"
+    # Рекомендуемая папка для ваших требований (путь в CLI можно указывать любой; поле для ясности в конфиге).
+    docs_dir: str = "examples/input"
+    sessions_dir: str = "runs"
     envs: list[EnvironmentConfig] = Field(default_factory=list)
     # Черновики багов через LLM (отдельный запрос). По умолчанию выключено — только тест-кейсы.
     generate_bug_templates: bool = False

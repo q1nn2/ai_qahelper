@@ -23,8 +23,10 @@ llm:
   # pdf_vision_render_scale: 2.0  # масштаб рендера страницы в PNG
   # use_structured_json_output: true  # responses.create + json_schema; при ошибке API — обычный текст + парсинг
 
-docs_dir: "tests/ai-docs"
-sessions_dir: "tests/ai-sessions"
+# Входы: кладите свои .md/.txt/.pdf сюда или указывайте путь в --requirement; для демо см. examples/minimal/
+docs_dir: "examples/input"
+# Артефакты запусков (сессии): unified-model, test-cases, отчёты
+sessions_dir: "runs"
 
 # Черновики баг-репортов через LLM (отдельный запрос). По умолчанию false — только тест-кейсы.
 # Включить для одного запуска: флаг --with-bug-drafts у agent-run / generate-docs.

@@ -153,7 +153,7 @@ def agent_run_cmd(
         typer.Option(
             "--session-label",
             "-L",
-            help="Метка в имени папки сессии под ai-sessions",
+            help="Метка в имени папки сессии (sessions_dir в конфиге, по умолчанию runs/)",
         ),
     ] = None,
 ) -> None:

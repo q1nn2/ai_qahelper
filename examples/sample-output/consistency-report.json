@@ -1,0 +1,15 @@
+{
+  "summary": {
+    "missing": 0,
+    "contradiction": 0,
+    "ambiguity": 1
+  },
+  "findings": [
+    {
+      "type": "ambiguity",
+      "source": "examples/minimal/requirements.md",
+      "requirement": "При валидных данных пользователь переходит в личный кабинет.",
+      "reason": "Не указан явный URL редиректа (эвристика / пример)."
+    }
+  ]
+}

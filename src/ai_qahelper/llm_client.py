@@ -8,7 +8,8 @@ import re
 from typing import Any, TypeVar
 
 from openai import APIError, OpenAI
-from pydantic import BaseModel, TypeAdapter, ValidationError as PydanticValidationError
+from pydantic import BaseModel, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from ai_qahelper.llm_errors import LlmEmptyResponse, LlmJsonParseError, LlmSchemaValidationError
 from ai_qahelper.models import LlmConfig
