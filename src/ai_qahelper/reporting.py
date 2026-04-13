@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 from pathlib import Path
 
 import gspread
@@ -13,6 +14,23 @@ from ai_qahelper.models import BugReport, ManualExecutionResult, TestCase, TestC
 
 # В выгрузке таблицы эти поля всегда пустые — их заполняет исполнитель (как в шаблоне TestRail/Excel).
 _EXPORT_BLANK_EXECUTOR_FIELDS = frozenset({"environment", "status", "bug_report_id"})
+
+
+_STEP_LEADING_ENUM = re.compile(r"^\s*\d+[\.)]\s+")
+
+
+def format_steps_for_export(steps: list[str]) -> str:
+    """Один столбец «Описание шагов»: нумерованный список, по одному шагу на строку внутри ячейки."""
+    lines: list[str] = []
+    n = 1
+    for raw in steps:
+        s = (raw or "").strip()
+        if not s:
+            continue
+        s = _STEP_LEADING_ENUM.sub("", s, count=1)
+        lines.append(f"{n}. {s}")
+        n += 1
+    return "\n".join(lines)
 
 
 def save_json(path: Path, payload: object) -> None:
@@ -38,7 +56,7 @@ def _test_case_cell(test_case: TestCase, field: str) -> str:
     if field in _EXPORT_BLANK_EXECUTOR_FIELDS:
         return ""
     if field == "steps":
-        return "\n".join(test_case.steps)
+        return format_steps_for_export(test_case.steps)
     if field == "source_refs":
         return "; ".join(test_case.source_refs)
     return str(getattr(test_case, field))
@@ -117,8 +135,14 @@ def export_manual_results_local(base_dir: Path, results: list[ManualExecutionRes
 def _write_csv(path: Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = fieldnames if fieldnames is not None else (list(rows[0].keys()) if rows else [])
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
+    # utf-8-sig: Excel на Windows корректно открывает кириллицу; QUOTE_MINIMAL — кавычки у полей с переносами строк.
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=keys,
+            extrasaction="ignore",
+            quoting=csv.QUOTE_MINIMAL,
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -147,7 +171,7 @@ def sync_test_cases_to_sheet(spreadsheet_id: str, worksheet_gid: str, test_cases
             c.case_id,
             c.title,
             c.preconditions,
-            "\n".join(c.steps),
+            format_steps_for_export(c.steps),
             c.expected_result,
             "",
             "",

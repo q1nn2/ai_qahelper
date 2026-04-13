@@ -8,8 +8,9 @@ import re
 from typing import Any, TypeVar
 
 from openai import APIError, OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError as PydanticValidationError
 
+from ai_qahelper.llm_errors import LlmEmptyResponse, LlmJsonParseError, LlmSchemaValidationError
 from ai_qahelper.models import LlmConfig
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def _parse_json_payload(text: str) -> Any:
                 return json.loads(snippet[start : end + 1])
         except json.JSONDecodeError:
             pass
-        raise first
+        raise LlmJsonParseError(f"Invalid JSON from model: {first}") from first
 
 
 class LlmClient:
@@ -59,6 +60,7 @@ class LlmClient:
             )
         timeout = float(config.request_timeout_seconds)
         self._client = OpenAI(base_url=config.base_url, api_key=api_key, timeout=timeout)
+        self._cfg = config
         self._model = config.model
         self._vision_model = (config.vision_model or "").strip() or "gpt-4o-mini"
         self._temperature = config.temperature
@@ -84,29 +86,62 @@ class LlmClient:
             kwargs["max_output_tokens"] = self._max_output_tokens
 
         logger.info(
-            "OpenAI responses.create: model=%s timeout=%s",
+            "OpenAI responses.create: model=%s timeout=%s structured=%s",
             self._model,
             getattr(self._client, "timeout", "?"),
+            self._cfg.use_structured_json_output,
         )
+
+        response = self._responses_create_with_fallback(kwargs, schema)
+
+        text = response.output_text
+        if not (text and text.strip()):
+            raise LlmEmptyResponse("Empty model response (output_text)")
+
+        parsed = _parse_json_payload(text)
+
+        if isinstance(parsed, list) and root_list_key:
+            parsed = {root_list_key: parsed}
+
         try:
-            response = self._client.responses.create(**kwargs)
+            return schema.model_validate(parsed)
+        except PydanticValidationError as exc:
+            raise LlmSchemaValidationError(
+                f"Model JSON does not match schema ({exc.error_count()} validation error(s))"
+            ) from exc
+
+    def _responses_create_with_fallback(self, kwargs: dict[str, Any], schema: type[T]) -> Any:
+        """Structured Outputs (json_schema) при возможности; иначе обычный ответ + ручной parse."""
+        kw = dict(kwargs)
+        if self._cfg.use_structured_json_output:
+            try:
+                json_schema = TypeAdapter(schema).json_schema()
+                kw_struct = {
+                    **kw,
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": "ai_qahelper_payload",
+                            "schema": json_schema,
+                            "strict": False,
+                        }
+                    },
+                }
+                return self._responses_create_retry_tokens(kw_struct)
+            except (APIError, TypeError, ValueError, OSError) as exc:
+                logger.warning("Structured output unavailable, using plain response: %s", exc)
+
+        return self._responses_create_retry_tokens(kw)
+
+    def _responses_create_retry_tokens(self, kwargs: dict[str, Any]) -> Any:
+        try:
+            return self._client.responses.create(**kwargs)
         except APIError as err:
             if "max_output_tokens" in kwargs and "max_output_tokens" in str(err).lower():
                 logger.warning("Retrying without max_output_tokens: %s", err)
                 kwargs.pop("max_output_tokens", None)
-                response = self._client.responses.create(**kwargs)
-            else:
-                raise
-
-        text = response.output_text
-        if not (text and text.strip()):
-            raise RuntimeError("Empty model response (output_text)")
-
-        parsed = _parse_json_payload(text)
-        if isinstance(parsed, list) and root_list_key:
-            parsed = {root_list_key: parsed}
-
-        return schema.model_validate(parsed)
+                return self._client.responses.create(**kwargs)
+            raise
 
     def describe_pdf_pages_for_requirements(
         self,

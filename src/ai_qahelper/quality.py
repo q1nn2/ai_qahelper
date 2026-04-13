@@ -5,14 +5,69 @@ import re
 from ai_qahelper.models import AutoExecutionResult, TestCase, UnifiedRequirementModel
 
 
+def _test_case_text_corpus(test_cases: list[TestCase]) -> str:
+    parts: list[str] = []
+    for tc in test_cases:
+        parts.extend(
+            [
+                tc.title,
+                tc.preconditions,
+                tc.expected_result,
+                tc.note,
+                " ".join(tc.source_refs),
+                " ".join(tc.steps),
+            ]
+        )
+    return " ".join(parts).lower()
+
+
+def _req_keyword_covers_requirement(req_content: str, corpus: str) -> bool:
+    keys = _keywords((req_content or "")[:4000])
+    if not keys:
+        return False
+    hits = sum(1 for k in keys if k in corpus)
+    need = max(1, min(len(keys), (len(keys) + 2) // 3))
+    return hits >= need
+
+
 def check_requirement_coverage(model: UnifiedRequirementModel, test_cases: list[TestCase]) -> dict:
+    """
+    Два эвристических уровня (не семантическая трассировка).
+    strict_source: путь/URL требования встречается в source_refs кейса.
+    keyword_overlap: токены из текста требования встречаются в текстах кейсов.
+    """
     req_count = len(model.requirements)
-    covered = 0
+    corpus = _test_case_text_corpus(test_cases)
+
+    strict_covered = 0
+    kw_covered = 0
     for req in model.requirements:
         if any(req.source in tc.source_refs for tc in test_cases):
-            covered += 1
-    ratio = (covered / req_count) if req_count else 1.0
-    return {"requirements_total": req_count, "requirements_covered": covered, "coverage_ratio": ratio}
+            strict_covered += 1
+        if _req_keyword_covers_requirement(req.content, corpus):
+            kw_covered += 1
+
+    strict_ratio = (strict_covered / req_count) if req_count else 1.0
+    kw_ratio = (kw_covered / req_count) if req_count else 1.0
+
+    return {
+        "coverage_mode": "heuristic_v1",
+        "note": (
+            "Эвристика, не полное семантическое покрытие: strict_source — совпадение source в source_refs; "
+            "keyword_overlap — пересечение ключевых слов текста требования с полями кейсов."
+        ),
+        "requirements_total": req_count,
+        "strict_source": {
+            "requirements_covered": strict_covered,
+            "coverage_ratio": strict_ratio,
+        },
+        "keyword_overlap": {
+            "requirements_covered": kw_covered,
+            "coverage_ratio": kw_ratio,
+        },
+        "requirements_covered": strict_covered,
+        "coverage_ratio": strict_ratio,
+    }
 
 
 def check_pass_rate(auto_results: list[AutoExecutionResult]) -> dict:

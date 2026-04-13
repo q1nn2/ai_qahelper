@@ -77,6 +77,8 @@ class LlmConfig(BaseModel):
     pdf_vision_max_output_tokens: int = 4096
     # Масштаб рендера страницы (2 ≈ ~144 DPI при 72 pt); больше — чётче, но тяжелее для API.
     pdf_vision_render_scale: float = 2.0
+    # responses.create с text.format json_schema (Structured Outputs); при ошибке — fallback на разбор текста.
+    use_structured_json_output: bool = True
 
     @model_validator(mode="after")
     def api_key_env_is_var_name(self) -> LlmConfig:

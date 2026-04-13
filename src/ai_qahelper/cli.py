@@ -37,8 +37,16 @@ def ingest_cmd(
     requirement_url: Annotated[list[str], typer.Option(help="Requirement URL")] = [],
     figma_file_key: Annotated[str | None, typer.Option(help="Figma file key")] = None,
     target_url: Annotated[str, typer.Option(help="Target web app URL")] = ...,
+    session_label: Annotated[
+        str | None,
+        typer.Option(
+            "--session-label",
+            "-L",
+            help="Короткая метка для имени папки сессии (иначе — из файла требований или host URL)",
+        ),
+    ] = None,
 ) -> None:
-    session_id = ingest(requirements, requirement_url, figma_file_key, target_url)
+    session_id = ingest(requirements, requirement_url, figma_file_key, target_url, session_label=session_label)
     print({"session_id": session_id})
 
 
@@ -140,6 +148,14 @@ def agent_run_cmd(
         bool,
         typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (быстрее, один запрос на кейсы)."),
     ] = False,
+    session_label: Annotated[
+        str | None,
+        typer.Option(
+            "--session-label",
+            "-L",
+            help="Метка в имени папки сессии под ai-sessions",
+        ),
+    ] = None,
 ) -> None:
     payload = agent_run(
         requirements,
@@ -150,6 +166,7 @@ def agent_run_cmd(
         max_cases=max_cases,
         with_bug_drafts=with_bug_drafts,
         skip_test_analysis=True if skip_test_analysis else None,
+        session_label=session_label,
     )
     print(payload)
 

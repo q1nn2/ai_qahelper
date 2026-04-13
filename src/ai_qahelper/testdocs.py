@@ -221,6 +221,8 @@ def generate_test_cases(
         "CRITICAL: environment, status, and bug_report_id MUST each be the empty string \"\" — "
         "these columns are filled by the human executor later; do not put URLs or draft/passed there. "
         "Put the stand URL in preconditions if needed (e.g. «Открыть сервис … [URL]»). "
+        "steps: each array item is exactly one action, in execution order; do NOT prefix with \"1.\" or \"2.\" — "
+        "numbering is added when exporting to CSV/Excel. "
         "Steps must be concrete and executable (имена полей, значения, ожидаемые сообщения на русском)."
     )
     if analysis is not None and analysis.test_conditions:

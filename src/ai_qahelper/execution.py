@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from ai_qahelper.models import AutoExecutionResult, ManualExecutionResult, TestCase
+from ai_qahelper.reporting import format_steps_for_export
 
 
 def run_manual_cases(test_cases: list[TestCase], evidence_dir: Path) -> list[ManualExecutionResult]:
@@ -11,10 +12,8 @@ def run_manual_cases(test_cases: list[TestCase], evidence_dir: Path) -> list[Man
     results: list[ManualExecutionResult] = []
     for case in test_cases:
         checklist = evidence_dir / f"{case.case_id}-manual-checklist.md"
-        checklist.write_text(
-            "\n".join([f"# {case.title}", "## Steps"] + [f"- {step}" for step in case.steps]),
-            encoding="utf-8",
-        )
+        steps_md = "\n".join(f"- {line}" for line in format_steps_for_export(case.steps).split("\n"))
+        checklist.write_text("\n".join([f"# {case.title}", "## Шаги", steps_md]), encoding="utf-8")
         results.append(
             ManualExecutionResult(
                 test_case_id=case.case_id,

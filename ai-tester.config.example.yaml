@@ -21,6 +21,7 @@ llm:
   # pdf_vision_pages_per_request: 2  # сколько страниц за один vision-запрос
   # pdf_vision_max_output_tokens: 4096
   # pdf_vision_render_scale: 2.0  # масштаб рендера страницы в PNG
+  # use_structured_json_output: true  # responses.create + json_schema; при ошибке API — обычный текст + парсинг
 
 docs_dir: "tests/ai-docs"
 sessions_dir: "tests/ai-sessions"
