@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ai_qahelper.llm_client import LlmClient
-from ai_qahelper.models import BugReport, TestCase, UnifiedRequirementModel
+from ai_qahelper.models import BugReport, LlmConfig, TestCase, UnifiedRequirementModel
 
 
 class TestCaseList(BaseModel):
@@ -17,14 +17,29 @@ class BugReportList(BaseModel):
     bug_reports: list[BugReport] = Field(default_factory=list)
 
 
-def _model_digest(model: UnifiedRequirementModel) -> str:
-    return json.dumps(model.model_dump(mode="json"), ensure_ascii=False, indent=2)
+def _model_digest_for_prompt(model: UnifiedRequirementModel, max_chars_per_source: int) -> str:
+    data = model.model_dump(mode="json")
+    for req in data.get("requirements", []):
+        content = req.get("content") or ""
+        if len(content) > max_chars_per_source:
+            req["content"] = (
+                content[:max_chars_per_source]
+                + "\n\n[TRUNCATED: source is longer; base cases on the text above and standard flows.]\n"
+            )
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _consistency_digest(consistency_report: dict[str, Any] | None) -> str:
+def _consistency_digest_for_prompt(consistency_report: dict[str, Any] | None, max_findings: int) -> str:
     if not consistency_report:
         return "{}"
-    return json.dumps(consistency_report, ensure_ascii=False, indent=2)
+    findings = consistency_report.get("findings") or []
+    slim: dict[str, Any] = {
+        "summary": consistency_report.get("summary", {}),
+        "findings": findings[:max_findings],
+    }
+    if len(findings) > max_findings:
+        slim["truncated_findings_note"] = f"{len(findings) - max_findings} more findings omitted"
+    return json.dumps(slim, ensure_ascii=False, indent=2)
 
 
 def generate_test_cases(
@@ -32,47 +47,52 @@ def generate_test_cases(
     model: UnifiedRequirementModel,
     consistency_report: dict[str, Any] | None = None,
     max_cases: int = 30,
+    *,
+    llm_cfg: LlmConfig,
 ) -> list[TestCase]:
     class Payload(BaseModel):
         test_cases: list[TestCase]
 
     system = (
         "You are a senior QA engineer. "
-        "Generate test cases in strict JSON only. "
-        "Use the required schema fields exactly and keep steps deterministic. "
-        "Write titles, preconditions, step descriptions, expected results, and notes in Russian "
-        "unless the source requirements are exclusively in another language (then match that language)."
+        "You MUST respond with a single JSON object only — no markdown fences, no text before or after. "
+        "The JSON must have exactly one top-level key: \"test_cases\" (array of objects). "
+        "Each object uses keys: case_id, title, preconditions, steps (array of strings), expected_result, "
+        "environment, status, bug_report_id, note, source_refs (array of strings). "
+        "Write titles, preconditions, steps, expected results, and notes in Russian when requirements are in Russian. "
+        "Steps must be concrete and executable (field names, values, expected messages)."
     )
     user = (
-        f"Generate up to {max_cases} cases.\n"
-        "Return each test case with fields: case_id, title, preconditions, steps, expected_result, "
-        "environment, status, bug_report_id, note, source_refs.\n"
-        "Set status to 'draft' and bug_report_id to empty string for new test cases.\n"
-        "Populate note with assumptions and traceability comments.\n"
-        "Each case must have deterministic, executable steps.\n"
-        "Use consistency findings to prioritize missing coverage and contradiction checks.\n"
-        "Each case must include source_refs to requirement sources and figma references when available.\n"
-        f"Consistency report:\n{_consistency_digest(consistency_report)}\n"
-        f"Unified model:\n{_model_digest(model)}"
+        f"Generate up to {max_cases} distinct, high-value test cases covering validation, main flows, and edge cases.\n"
+        "Set status to \"draft\" and bug_report_id to \"\" for every case.\n"
+        "environment should be the target app base URL when relevant.\n"
+        "source_refs must cite requirement source paths or section hints from the unified model.\n"
+        f"Consistency (subset):\n{_consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)}\n"
+        f"Unified model:\n{_model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source)}"
     )
-    payload = llm.complete_json(system, user, Payload)
+    payload = llm.complete_json(system, user, Payload, root_list_key="test_cases")
     return payload.test_cases
 
 
-def generate_bug_report_templates(llm: LlmClient, test_cases: list[TestCase], max_items: int = 20) -> list[BugReport]:
+def generate_bug_report_templates(
+    llm: LlmClient,
+    test_cases: list[TestCase],
+    max_items: int = 20,
+) -> list[BugReport]:
     class Payload(BaseModel):
         bug_reports: list[BugReport]
 
     system = (
-        "You are QA lead. Generate likely bug report drafts in strict JSON. "
+        "You are QA lead. Reply with a single JSON object only — no markdown. "
+        "Top-level key must be \"bug_reports\" (array). "
         "Use Russian for titles and narrative fields when test cases are in Russian."
     )
     user = (
-        f"Generate up to {max_items} bug draft templates from these test cases. "
+        f"Generate up to {max_items} plausible bug draft templates from these test cases. "
         "Do not invent impossible flows.\n"
         f"{json.dumps([c.model_dump() for c in test_cases], ensure_ascii=False)}"
     )
-    payload = llm.complete_json(system, user, Payload)
+    payload = llm.complete_json(system, user, Payload, root_list_key="bug_reports")
     return payload.bug_reports
 
 

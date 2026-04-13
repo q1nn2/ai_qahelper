@@ -8,6 +8,9 @@ llm:
   api_key_env: "OPENAI_API_KEY"
   # api_key: null  # опционально в ai-tester.config.yaml: строка ключа, если не хотите env
   temperature: 0.2
+  # max_output_tokens: 16384  # лимит ответа (JSON с тест-кейсами)
+  # max_requirement_chars_per_source: 52000  # усечение текста одного PDF/файла в промпте
+  # max_consistency_findings: 40  # сколько finding’ов из отчёта отдавать в LLM
 
 docs_dir: "tests/ai-docs"
 sessions_dir: "tests/ai-sessions"

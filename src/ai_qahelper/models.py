@@ -19,6 +19,10 @@ class LlmConfig(BaseModel):
     api_key_env: str = "OPENAI_API_KEY"
     api_key: str | None = None
     temperature: float = 0.2
+    # Large PDFs need a smaller prompt; long JSON answers need a high output budget.
+    max_output_tokens: int = 16384
+    max_requirement_chars_per_source: int = 52000
+    max_consistency_findings: int = 40
 
 
 class AppConfig(BaseModel):

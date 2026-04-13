@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,8 @@ from ai_qahelper.reporting import (
     sync_test_cases_to_sheet,
 )
 from ai_qahelper.testdocs import fallback_test_cases, generate_bug_report_templates, generate_test_cases
+
+logger = logging.getLogger(__name__)
 
 
 def _session_root() -> Path:
@@ -106,14 +109,23 @@ def generate_docs(session_id: str) -> SessionState:
     consistency_json = session_dir / "consistency-report.json"
     save_json(consistency_json, consistency)
 
+    err_path = session_dir / "llm-generation-errors.log"
     try:
-        test_cases = _retry(2, lambda: generate_test_cases(llm, unified, consistency_report=consistency))
-    except Exception:
+        test_cases = _retry(
+            2,
+            lambda: generate_test_cases(llm, unified, consistency_report=consistency, llm_cfg=cfg.llm),
+        )
+    except Exception as exc:
+        logger.exception("generate_test_cases failed, using fallback")
+        err_path.write_text(f"generate_test_cases:\n{type(exc).__name__}: {exc}\n", encoding="utf-8")
         test_cases = fallback_test_cases(unified)
     bug_templates: list[BugReport]
     try:
         bug_templates = _retry(2, lambda: generate_bug_report_templates(llm, test_cases))
-    except Exception:
+    except Exception as exc:
+        logger.exception("generate_bug_report_templates failed, skipping bug drafts")
+        with err_path.open("a", encoding="utf-8") as f:
+            f.write(f"\ngenerate_bug_report_templates:\n{type(exc).__name__}: {exc}\n")
         bug_templates = []
 
     test_cases_json = session_dir / "test-cases.json"
