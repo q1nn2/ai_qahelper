@@ -1,0 +1,16 @@
+# Совместимо с pyproject.toml [project.dependencies].
+# Автотесты (pytest + HTML-отчёт + Playwright): pip install -e ".[autotest]" из каталога ai_qahelper
+
+openai>=1.40.0
+typer>=0.12.0
+rich>=13.0.0
+pydantic>=2.0.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+pypdf>=4.0.0
+pymupdf>=1.24.0
+pandas>=2.0.0
+openpyxl>=3.0.0
+gspread>=6.0.0
+google-auth>=2.0.0

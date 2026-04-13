@@ -1,0 +1,56 @@
+# Скопируйте в ai-tester.config.yaml и поправьте под проект.
+# Ключ OpenAI нигде в репозитории не хранится. Задайте один из вариантов:
+#   1) Файл .env в каталоге ai_qahelper (откуда запускаете CLI): OPENAI_API_KEY=sk-...
+#   2) Системная/пользовательская переменная окружения OPENAI_API_KEY
+#   3) Поле llm.api_key в локальном ai-tester.config.yaml (файл в .gitignore, не коммитить)
+# Этот example-файл можно коммитить; секреты в него не пишите.
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4.1-mini"
+  api_key_env: "OPENAI_API_KEY"
+  temperature: 0.2
+  # max_output_tokens: 16384  # лимит ответа (JSON с тест-кейсами)
+  # По умолчанию в коде 0 = без усечения. Чтобы урезать промпт при огромных PDF:
+  # max_requirement_chars_per_source: 52000
+  # max_consistency_findings: 40
+  # max_analysis_json_chars: 16000
+  # max_test_cases: 5  # число тест-кейсов (перекрывается флагом --max-cases); 5 — удобно для проверки агента
+  # vision_model: "gpt-4o-mini"  # модель с vision для скриншотов страниц PDF (отдельные запросы chat.completions)
+  # pdf_vision_max_pages: 40
+  # pdf_vision_pages_per_request: 2  # сколько страниц за один vision-запрос
+  # pdf_vision_max_output_tokens: 4096
+  # pdf_vision_render_scale: 2.0  # масштаб рендера страницы в PNG
+  # use_structured_json_output: true  # responses.create + json_schema; при ошибке API — обычный текст + парсинг
+
+docs_dir: "tests/ai-docs"
+sessions_dir: "tests/ai-sessions"
+
+# Черновики баг-репортов через LLM (отдельный запрос). По умолчанию false — только тест-кейсы.
+# Включить для одного запуска: флаг --with-bug-drafts у agent-run / generate-docs.
+generate_bug_templates: false
+
+# Тест-анализ (техники тест-дизайна, условия COND-xx) отдельным LLM-запросом перед генерацией кейсов.
+# Выключить: false или флаг --skip-test-analysis у agent-run / generate-docs.
+generate_test_analysis: true
+
+# PDF: текст + рендер страниц в изображения и описание vision-моделью (нужен пакет pymupdf).
+# Выключить: false — только извлечение текста (pypdf / PyMuPDF), без распознавания картинок на страницах.
+pdf_vision: true
+
+# Шаблон колонок для test-cases.csv / .xlsx (русские заголовки). Если не задано — встроенный шаблон.
+# Доступные field: case_id, title, preconditions, steps, expected_result, environment, status, bug_report_id, note, source_refs
+# test_cases_export:
+#   - field: case_id
+#     header: "ID"
+#   - field: title
+#     header: "Название тест-кейса"
+#   - field: source_refs
+#     header: "Ссылка на требование"
+
+# Разрешённые окружения: host из --target-url должен совпадать с host у одного из base_url.
+# Пустой список = проверка отключена, любой target_url.
+envs: []
+# envs:
+#   - name: "qa-routes"
+#     base_url: "https://qa-routes.praktikum-services.ru"
