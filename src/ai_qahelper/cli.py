@@ -25,7 +25,15 @@ def run_cli() -> None:
 
 @app.command("ingest")
 def ingest_cmd(
-    requirements: Annotated[list[str], typer.Option(help="Local requirement paths (.txt/.md/.pdf)")] = [],
+    requirements: Annotated[
+        list[str],
+        typer.Option(
+            "--requirement",
+            "--requirements",
+            "-r",
+            help="Local requirement paths (.txt/.md/.pdf); repeat flag for multiple files",
+        ),
+    ] = [],
     requirement_url: Annotated[list[str], typer.Option(help="Requirement URL")] = [],
     figma_file_key: Annotated[str | None, typer.Option(help="Figma file key")] = None,
     target_url: Annotated[str, typer.Option(help="Target web app URL")] = ...,
@@ -79,7 +87,15 @@ def sync_reports_cmd(session_id: str, test_cases_sheet_url: str, bug_reports_she
 
 @app.command("agent-run")
 def agent_run_cmd(
-    requirements: Annotated[list[str], typer.Option(help="Local requirement paths (.txt/.md/.pdf)")] = [],
+    requirements: Annotated[
+        list[str],
+        typer.Option(
+            "--requirement",
+            "--requirements",
+            "-r",
+            help="Local requirement paths (.txt/.md/.pdf); repeat flag for multiple files",
+        ),
+    ] = [],
     requirement_url: Annotated[list[str], typer.Option(help="Requirement URL")] = [],
     figma_file_key: Annotated[str | None, typer.Option(help="Figma file key (optional; omit if design is only in Cursor/MCP)")] = None,
     target_url: Annotated[str | None, typer.Option(help="Target web app URL")] = None,
