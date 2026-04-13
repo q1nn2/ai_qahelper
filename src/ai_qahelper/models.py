@@ -17,6 +17,7 @@ class LlmConfig(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     model: str = "gpt-4.1-mini"
     api_key_env: str = "OPENAI_API_KEY"
+    api_key: str | None = None
     temperature: float = 0.2
 
 

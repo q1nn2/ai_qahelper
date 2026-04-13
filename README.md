@@ -30,13 +30,17 @@ playwright install chromium
 
 2. В `ai-tester.config.yaml` задайте модель и список разрешённых окружений (`envs`). Если `envs` пустой, проверка `target_url` отключена.
 
-3. Переменные окружения:
+3. Ключ OpenAI: либо переменная окружения `OPENAI_API_KEY`, либо в **только локальном** `ai-tester.config.yaml` поле `llm.api_key: "sk-..."`. В `ai-tester.config.example.yaml` и в git секреты не кладутся. Поле `api_key_env` в YAML — это **имя** переменной окружения, а не сам ключ.
+
+4. Переменные окружения:
 
    | Переменная | Назначение |
    |------------|------------|
-   | `OPENAI_API_KEY` | Ключ OpenAI (обязательно для генерации) |
+   | `OPENAI_API_KEY` | Ключ OpenAI (если не задан `llm.api_key` в локальном yaml) |
    | `FIGMA_API_TOKEN` | Токен Figma (опционально, для `--figma-file-key`) |
    | `GOOGLE_SERVICE_ACCOUNT_JSON` | Путь к JSON сервисного аккаунта (опционально, для `sync-reports` в Google Sheets) |
+
+Если ключ когда‑либо попал в отслеживаемый файл или в публичный репозиторий, [отзовите его](https://platform.openai.com/api-keys) и создайте новый.
 
 ## Команды
 

@@ -14,9 +14,11 @@ T = TypeVar("T", bound=BaseModel)
 
 class LlmClient:
     def __init__(self, config: LlmConfig) -> None:
-        api_key = os.getenv(config.api_key_env)
+        api_key = (config.api_key or "").strip() or os.getenv(config.api_key_env)
         if not api_key:
-            raise RuntimeError(f"Missing API key in env var: {config.api_key_env}")
+            raise RuntimeError(
+                f"Missing API key: set llm.api_key in ai-tester.config.yaml or env var {config.api_key_env}"
+            )
         self._client = OpenAI(base_url=config.base_url, api_key=api_key)
         self._model = config.model
         self._temperature = config.temperature
