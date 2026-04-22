@@ -55,7 +55,7 @@ def generate_docs_cmd(
     session_id: str,
     max_cases: Annotated[
         int | None,
-        typer.Option(help="Number of test cases to generate; overrides llm.max_test_cases in config"),
+        typer.Option(help="Number of checklist items or test cases to generate; overrides config defaults"),
     ] = None,
     with_bug_drafts: Annotated[
         bool,
@@ -65,6 +65,10 @@ def generate_docs_cmd(
         bool,
         typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (один запрос вместо двух)."),
     ] = False,
+    output: Annotated[
+        str,
+        typer.Option("--output", help="Какой артефакт сгенерировать: testcases или checklist."),
+    ] = "testcases",
 ) -> None:
     bug_arg = True if with_bug_drafts else None
     skip_a = True if skip_test_analysis else None
@@ -73,13 +77,16 @@ def generate_docs_cmd(
         max_cases=max_cases,
         generate_bug_templates=bug_arg,
         skip_test_analysis=skip_a,
+        artifact_type="checklist" if output == "checklist" else "testcases",
     )
     print(
         {
             "session_id": state.session_id,
             "test_analysis_path": state.test_analysis_path,
+            "checklist_path": state.checklist_path,
             "test_cases_path": state.test_cases_path,
             "bug_reports_path": state.bug_reports_path,
+            "artifact_type": output,
         }
     )
 
@@ -138,7 +145,7 @@ def agent_run_cmd(
     out_dir: Annotated[str | None, typer.Option(help="Optional output directory for summary file")] = None,
     max_cases: Annotated[
         int | None,
-        typer.Option(help="How many test cases to generate; overrides llm.max_test_cases in config"),
+        typer.Option(help="How many checklist items or test cases to generate; overrides config defaults"),
     ] = None,
     with_bug_drafts: Annotated[
         bool,
@@ -146,8 +153,12 @@ def agent_run_cmd(
     ] = False,
     skip_test_analysis: Annotated[
         bool,
-        typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (быстрее, один запрос на кейсы)."),
+        typer.Option("--skip-test-analysis", help="Пропустить LLM шаг тест-анализа (быстрее, один запрос на артефакт)."),
     ] = False,
+    output: Annotated[
+        str,
+        typer.Option("--output", help="Какой артефакт сгенерировать: testcases или checklist."),
+    ] = "testcases",
     session_label: Annotated[
         str | None,
         typer.Option(
@@ -167,6 +178,7 @@ def agent_run_cmd(
         with_bug_drafts=with_bug_drafts,
         skip_test_analysis=True if skip_test_analysis else None,
         session_label=session_label,
+        artifact_type="checklist" if output == "checklist" else "testcases",
     )
     print(payload)
 
