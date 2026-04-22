@@ -28,6 +28,7 @@ def _coerce_string_list(v: Any) -> list[str]:
         return [v.strip()] if v.strip() else []
     return [str(v).strip()] if str(v).strip() else []
 
+
 # Поля TestCase, доступные для выгрузки в CSV/XLSX (заголовки задаются в test_cases_export).
 TestCaseExportField = Literal[
     "case_id",
@@ -81,7 +82,7 @@ class LlmConfig(BaseModel):
     use_structured_json_output: bool = True
 
     @model_validator(mode="after")
-    def api_key_env_is_var_name(self) -> LlmConfig:
+    def api_key_env_is_var_name(self) -> "LlmConfig":
         name = (self.api_key_env or "").strip()
         if name.startswith("sk-"):
             msg = (
@@ -100,7 +101,7 @@ class AppConfig(BaseModel):
     envs: list[EnvironmentConfig] = Field(default_factory=list)
     # Черновики багов через LLM (отдельный запрос). По умолчанию выключено — только тест-кейсы.
     generate_bug_templates: bool = False
-    # Отдельный LLM-шаг: тест-анализ и техники тест-дизайна перед генерацией кейсов.
+    # Отдельный LLM-шаг: тест-анализ и техники тест-дизайна перед генерацией артефактов.
     generate_test_analysis: bool = True
     # Колонки выгрузки test-cases.csv / .xlsx; None = встроенный русскоязычный шаблон.
     test_cases_export: list[TestCaseExportColumn] | None = None
@@ -152,7 +153,7 @@ class AnalysisTestCondition(BaseModel):
 
 
 class TestAnalysisReport(BaseModel):
-    """Результат тест-анализа перед генерацией тест-кейсов."""
+    """Результат тест-анализа перед генерацией документации."""
 
     scope: str = ""
     assumptions: str = ""
@@ -167,6 +168,16 @@ class TestAnalysisReport(BaseModel):
     def _normalize_str_lists(cls, v: Any) -> list[str]:
         """LLM иногда возвращает объект вместо массива строк — приводим к list[str]."""
         return _coerce_string_list(v)
+
+
+class ChecklistItem(BaseModel):
+    item_id: str
+    area: str = ""
+    check: str
+    expected_result: str
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
+    note: str = ""
+    source_refs: list[str] = Field(default_factory=list)
 
 
 class TestCase(BaseModel):
@@ -220,6 +231,7 @@ class SessionState(BaseModel):
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
+    checklist_path: str | None = None
     test_cases_path: str | None = None
     bug_reports_path: str | None = None
     generated_tests_dir: str | None = None
