@@ -84,7 +84,7 @@ def generate_docs(
             logger.exception("generate_checklist failed, using fallback")
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_checklist:\n{type(exc).__name__}: {exc}\n")
-            checklist = fallback_checklist(unified, analysis, max_items=n_items)
+            checklist = fallback_checklist(unified, max_items=n_items)
         checklist_json = sdir / "checklist.json"
         save_json(checklist_json, [c.model_dump() for c in checklist])
         export_checklist_local(sdir, checklist)
