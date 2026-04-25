@@ -9,6 +9,7 @@ from ai_qahelper.chat_planner import ChatPlan, PlannerResult, plan_message
 
 Intent = Literal[
     "agent_run",
+    "discover_site",
     "generate_docs",
     "run_manual",
     "generate_autotests",
@@ -51,6 +52,7 @@ def format_plan(plan: ChatPlan) -> str:
         return "План пуст."
     names = {
         "agent_run": "Анализ требований и базовая генерация",
+        "discover_site": "Site discovery по фактическому поведению сайта",
         "generate_docs": "Генерация документации",
         "run_manual": "Шаблон ручного прогона",
         "generate_autotests": "Подготовка автотестов",
@@ -140,6 +142,9 @@ def handle_message(
         for idx, item in enumerate(results, start=1):
             title = item.get("title") or item.get("action") or f"Шаг {idx}"
             lines.append(f"{idx}. {title}: готово")
+    if any(action.type == "discover_site" for action in plan.actions):
+        lines.append("")
+        lines.append("Тест-кейсы созданы по фактическому поведению сайта, а не по требованиям.")
 
     return ChatResponse(
         "\n".join(lines),

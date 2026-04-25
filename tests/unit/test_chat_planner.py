@@ -107,6 +107,39 @@ def test_missing_requirements_and_session_asks_clarification() -> None:
     assert "Загрузи требования" in response.message
 
 
+def test_site_discovery_message_creates_discover_plan() -> None:
+    context = ChatContext(target_url="https://example.com")
+
+    result = plan_message(
+        "Требований нет, проанализируй сайт https://example.com и напиши тест-кейсы",
+        context,
+        allow_llm=False,
+    )
+
+    assert result.plan.needs_clarification is False
+    assert [action.type for action in result.plan.actions[:2]] == ["discover_site", "generate_docs"]
+    assert result.plan.actions[1].artifact_type == "testcases"
+    assert result.plan.actions[1].focus == "general"
+
+
+def test_site_discovery_does_not_ask_for_requirements() -> None:
+    context = ChatContext(target_url="https://example.com")
+
+    result = plan_message("Нет требований, посмотри сайт и составь тест-кейсы по сайту", context, allow_llm=False)
+
+    assert result.plan.needs_clarification is False
+    assert "discover_site" in _action_types(result)
+
+
+def test_site_discovery_without_target_url_asks_clarification() -> None:
+    context = ChatContext()
+
+    result = plan_message("Требований нет, проанализируй сайт и напиши тест-кейсы", context, allow_llm=False)
+
+    assert result.plan.needs_clarification is True
+    assert "target URL" in result.plan.clarification_question
+
+
 def test_prepare_bugs_without_auto_results_generates_bug_templates(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -233,3 +266,67 @@ def test_executor_runs_agent_then_smoke_then_negative(monkeypatch) -> None:
     assert context.session_id == "s1"
     assert calls == [("agent_run", "testcases"), ("generate_docs", "smoke"), ("generate_docs", "negative")]
     assert results[-1]["test_cases_path"] == "runs/s1/test-cases-negative.json"
+
+
+def test_executor_discover_site_updates_session_id(monkeypatch) -> None:
+    class FakeState:
+        def model_dump(self, mode: str = "json") -> dict:
+            return {
+                "session_id": "site-s1",
+                "site_model_path": "runs/site-s1/site-model.json",
+                "unified_model_path": "runs/site-s1/unified-model.json",
+            }
+
+    monkeypatch.setattr("ai_qahelper.chat_executor.discover_site", lambda target_url: FakeState())
+
+    plan = ChatPlan(actions=[PlanAction(type="discover_site")])
+    context = ChatContext(target_url="https://example.com")
+
+    results = PlanExecutor().execute(context, plan)
+
+    assert context.session_id == "site-s1"
+    assert results[0]["site_model_path"] == "runs/site-s1/site-model.json"
+
+
+def test_executor_can_generate_docs_after_discover_site(monkeypatch) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    class FakeDiscoveryState:
+        def model_dump(self, mode: str = "json") -> dict:
+            return {
+                "session_id": "site-s1",
+                "site_model_path": "runs/site-s1/site-model.json",
+                "unified_model_path": "runs/site-s1/unified-model.json",
+            }
+
+    class FakeDocsState:
+        def model_dump(self, mode: str = "json") -> dict:
+            return {
+                "session_id": "site-s1",
+                "test_cases_path": "runs/site-s1/test-cases-ui.json",
+            }
+
+    def _fake_discover_site(target_url: str):
+        calls.append(("discover_site", target_url))
+        return FakeDiscoveryState()
+
+    def _fake_generate_docs(session_id: str, **kwargs):
+        calls.append(("generate_docs", kwargs.get("focus")))
+        return FakeDocsState()
+
+    monkeypatch.setattr("ai_qahelper.chat_executor.discover_site", _fake_discover_site)
+    monkeypatch.setattr("ai_qahelper.chat_executor.generate_docs", _fake_generate_docs)
+
+    plan = ChatPlan(
+        actions=[
+            PlanAction(type="discover_site"),
+            PlanAction(type="generate_docs", artifact_type="testcases", focus="ui"),
+        ]
+    )
+    context = ChatContext(target_url="https://example.com")
+
+    results = PlanExecutor().execute(context, plan)
+
+    assert context.session_id == "site-s1"
+    assert calls == [("discover_site", "https://example.com"), ("generate_docs", "ui")]
+    assert results[-1]["test_cases_path"] == "runs/site-s1/test-cases-ui.json"

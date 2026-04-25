@@ -11,6 +11,7 @@ from ai_qahelper.llm_client import LlmClient
 
 ActionType = Literal[
     "agent_run",
+    "discover_site",
     "generate_docs",
     "run_manual",
     "generate_autotests",
@@ -37,6 +38,7 @@ Focus = Literal[
 CONFIRMATION_ACTIONS: set[ActionType] = {"run_autotests", "sync_reports"}
 SUPPORTED_ACTIONS: tuple[ActionType, ...] = (
     "agent_run",
+    "discover_site",
     "generate_docs",
     "run_manual",
     "generate_autotests",
@@ -98,8 +100,11 @@ class PlannerResult(BaseModel):
 PLANNER_SYSTEM_PROMPT = """
 Ты AI QA Lead и test architect. Твоя задача — понять сообщение пользователя и вернуть строгий JSON-план.
 Не выполняй задачу сам. Используй только поддерживаемые action types:
-agent_run, generate_docs, run_manual, generate_autotests, run_autotests, draft_bugs, generate_bug_templates, sync_reports, help.
+agent_run, discover_site, generate_docs, run_manual, generate_autotests, run_autotests, draft_bugs, generate_bug_templates, sync_reports, help.
 draft_bugs используй только для багов по падениям автотестов. generate_bug_templates используй для черновиков багов по требованиям, рискам или тест-кейсам.
+discover_site используй, когда requirements нет, но есть target_url и пользователь явно просит проанализировать/посмотреть/исследовать сайт или сделать тест-кейсы без требований. После discover_site обычно добавь generate_docs с artifact_type=testcases и focus=general, либо focus=ui если пользователь явно просит UI-проверки.
+Если requirements есть — используй обычный pipeline через agent_run/generate_docs, не discover_site.
+Для site discovery не придумывай бизнес-требования: тесты должны быть exploratory/smoke/UI по фактически видимому поведению сайта.
 
 Для каждого action верни поля:
 type, artifact_type, focus, max_cases, requires_confirmation, reason.
@@ -107,7 +112,7 @@ type, artifact_type, focus, max_cases, requires_confirmation, reason.
 artifact_type: testcases | checklist | none.
 focus: smoke | regression | negative | api | ui | mobile | security | performance | accessibility | general.
 Если не хватает обязательных данных, верни needs_clarification=true и clarification_question.
-Если действие запускает браузер, меняет внешние таблицы или запускает автотесты — requires_confirmation=true.
+Если действие меняет внешние таблицы или запускает автотесты — requires_confirmation=true. Для discover_site подтверждение не нужно.
 Для run_autotests и sync_reports always requires_confirmation=true.
 
 Верни только JSON без markdown.
@@ -320,6 +325,7 @@ def _build_user_prompt(
         },
         "instructions": {
             "agent_run": "Use when a new session must be created from requirements and initial analysis/docs should run.",
+            "discover_site": "Use when no requirements are provided, target_url exists, and the user asks to analyze/discover the site or create test cases without requirements.",
             "generate_docs": "Use for additional testcases/checklist generation in a specific focus.",
             "draft_bugs": "Use only when the user asks to prepare bug reports from failed autotest results.",
             "generate_bug_templates": "Use when the user asks for bug report drafts from requirements, risks, or generated test cases.",
@@ -344,9 +350,14 @@ def fallback_plan_message(
 ) -> ChatPlan:
     text = user_message.lower()
     effective_session_id = session_id if session_id is not None else getattr(context, "session_id", None)
+    effective_requirements = requirements if requirements is not None else list(getattr(context, "requirements", []) or [])
+    effective_requirement_urls = (
+        requirement_urls if requirement_urls is not None else list(getattr(context, "requirement_urls", []) or [])
+    )
     effective_output = output if output is not None else getattr(context, "output", "testcases")
     effective_max_cases = max_cases if max_cases is not None else getattr(context, "max_cases", None)
     signals = _collect_fallback_signals(text, effective_output)
+    wants_site_discovery = _wants_site_discovery(text) and not (effective_requirements or effective_requirement_urls)
 
     if signals.wants_help:
         return ChatPlan(
@@ -356,7 +367,26 @@ def fallback_plan_message(
         )
 
     actions = list(signals.actions)
-    if signals.wants_docs or signals.focuses:
+    if wants_site_discovery and not effective_session_id:
+        actions.append(
+            _action(
+                "discover_site",
+                "none",
+                "general",
+                None,
+                "Пользователь просит исследовать сайт без требований",
+            )
+        )
+        actions.append(
+            _action(
+                "generate_docs",
+                signals.artifact_type,
+                "ui" if "ui" in signals.focuses else "general",
+                effective_max_cases,
+                "Сгенерировать exploratory/smoke/UI тест-кейсы по фактическому поведению сайта",
+            )
+        )
+    elif signals.wants_docs or signals.focuses:
         if not effective_session_id:
             first_focus = signals.focuses[0] if signals.artifact_type == "checklist" and signals.focuses else "general"
             actions.insert(
@@ -448,13 +478,23 @@ def _apply_clarification_rules(
 ) -> ChatPlan:
     if plan.needs_clarification:
         return plan
-    new_session_actions = {"agent_run"}
+    new_session_actions = {"agent_run", "discover_site"}
     session_bound_doc_actions = {"generate_docs", "generate_bug_templates", "generate_autotests", "run_manual"}
     needs_new_session = any(action.type in new_session_actions for action in plan.actions)
+    has_discovery = any(action.type == "discover_site" for action in plan.actions)
     can_start_from_inputs = bool(requirements or requirement_urls)
-    if not session_id and any(action.type in session_bound_doc_actions for action in plan.actions):
+    if not session_id and any(action.type in session_bound_doc_actions for action in plan.actions) and not has_discovery:
         needs_new_session = True
     if not needs_new_session:
+        return plan
+    if has_discovery:
+        if not target_url:
+            return plan.model_copy(
+                update={
+                    "needs_clarification": True,
+                    "clarification_question": "Укажи target URL для site discovery.",
+                }
+            )
         return plan
     if not can_start_from_inputs:
         return plan.model_copy(
@@ -541,6 +581,24 @@ def _wants_docs(text: str) -> bool:
     return _has_any(text, *FALLBACK_DOC_ALIASES)
 
 
+def _wants_site_discovery(text: str) -> bool:
+    return _has_any(
+        text,
+        "требований нет",
+        "нет требований",
+        "проанализируй сайт",
+        "посмотри сайт",
+        "исследуй сайт",
+        "составь тест-кейсы по сайту",
+        "вот ссылка на сайт",
+        "сделай тест-кейсы без требований",
+        "без требований",
+        "analyze site",
+        "discover site",
+        "without requirements",
+    )
+
+
 def _extract_focus_sequence(text: str) -> list[Focus]:
     patterns: list[tuple[Focus, tuple[str, ...]]] = [
         ("smoke", ("smoke", "смоук", "дым")),
@@ -588,6 +646,8 @@ def _build_goal(actions: list[PlanAction]) -> str:
     for action in actions:
         if action.type == "agent_run":
             parts.append("анализ требований")
+        elif action.type == "discover_site":
+            parts.append("site discovery")
         elif action.type == "generate_docs":
             parts.append(f"{action.focus} {action.artifact_type}")
         elif action.type == "draft_bugs":
@@ -606,6 +666,7 @@ def _build_goal(actions: list[PlanAction]) -> str:
 def _summary_for_actions(actions: list[PlanAction]) -> str:
     readable = {
         "agent_run": "проанализирую требования",
+        "discover_site": "исследую сайт без требований",
         "generate_docs": "подготовлю QA-документацию",
         "run_manual": "создам ручной прогон",
         "generate_autotests": "подготовлю автотесты",

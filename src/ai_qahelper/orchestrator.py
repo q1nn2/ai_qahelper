@@ -15,6 +15,7 @@ from ai_qahelper.autotest_service import (
 from ai_qahelper.docs_service import generate_bug_templates_for_session, generate_docs
 from ai_qahelper.reporting import save_json
 from ai_qahelper.session_service import ingest
+from ai_qahelper.site_discovery import discover_site
 from ai_qahelper.sync_service import sync_reports
 
 ArtifactType = Literal["testcases", "checklist"]
@@ -22,6 +23,7 @@ ArtifactType = Literal["testcases", "checklist"]
 __all__ = [
     "agent_run",
     "create_bug_drafts_from_failures",
+    "discover_site",
     "generate_autotests",
     "generate_bug_templates_for_session",
     "generate_docs",

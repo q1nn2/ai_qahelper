@@ -6,6 +6,7 @@ from ai_qahelper.chat_planner import ChatPlan, PlanAction
 from ai_qahelper.orchestrator import (
     agent_run,
     create_bug_drafts_from_failures,
+    discover_site,
     generate_autotests,
     generate_bug_templates_for_session,
     generate_docs,
@@ -39,6 +40,7 @@ def collect_artifacts(results: list[dict]) -> list[str]:
         "unified_model_path",
         "consistency_report_path",
         "test_analysis_path",
+        "site_model_path",
         "checklist_path",
         "test_cases_path",
         "bug_reports_path",
@@ -80,6 +82,16 @@ def _handle_agent_run(context: Any, action: PlanAction, user_message: str) -> di
         skip_test_analysis=True if context.skip_test_analysis else None,
         artifact_type=artifact_type,
     )
+    data["action"] = action.type
+    data["title"] = _action_title(action)
+    return data
+
+
+def _handle_discover_site(context: Any, action: PlanAction, user_message: str) -> dict:
+    if not context.target_url:
+        raise ValueError("Укажи target URL для site discovery.")
+    state = discover_site(context.target_url)
+    data = state.model_dump(mode="json")
     data["action"] = action.type
     data["title"] = _action_title(action)
     return data
@@ -164,6 +176,7 @@ def _handle_sync_reports(context: Any, action: PlanAction, user_message: str) ->
 
 _ACTION_HANDLERS = {
     "agent_run": _handle_agent_run,
+    "discover_site": _handle_discover_site,
     "generate_docs": _handle_generate_docs,
     "run_manual": _handle_run_manual,
     "generate_autotests": _handle_generate_autotests,
@@ -183,6 +196,8 @@ def _require_session(context: Any) -> None:
 def _action_title(action: PlanAction) -> str:
     if action.type == "agent_run":
         return "Анализ требований"
+    if action.type == "discover_site":
+        return "Site discovery"
     if action.type == "generate_docs":
         if action.focus != "general":
             return f"{action.focus} {action.artifact_type}"

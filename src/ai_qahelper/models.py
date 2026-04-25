@@ -228,6 +228,7 @@ class SessionState(BaseModel):
     target_url: HttpUrl
     requirements_files: list[str] = Field(default_factory=list)
     figma_file_key: str | None = None
+    site_model_path: str | None = None
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
