@@ -43,6 +43,7 @@ def collect_artifacts(results: list[dict]) -> list[str]:
         "input_coverage_report_path",
         "consistency_report_path",
         "test_analysis_path",
+        "quality_report_path",
         "site_model_path",
         "exploratory_report_path",
         "exploratory_report_md_path",

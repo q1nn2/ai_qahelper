@@ -81,6 +81,7 @@ def agent_run(
         "input_coverage_report_path": state.input_coverage_report_path,
         "consistency_report_path": state.consistency_report_path,
         "test_analysis_path": state.test_analysis_path,
+        "quality_report_path": state.quality_report_path,
         "checklist_path": state.checklist_path,
         "test_cases_path": state.test_cases_path,
         "dedup_report_path": state.dedup_report_path,

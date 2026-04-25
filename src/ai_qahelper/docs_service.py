@@ -7,6 +7,12 @@ from typing import Literal
 
 from ai_qahelper.config import load_config
 from ai_qahelper.deduplication import deduplicate_test_cases
+from ai_qahelper.documentation_quality import (
+    apply_quality_marks_to_checklist,
+    apply_quality_marks_to_test_cases,
+    evaluate_checklist_items,
+    evaluate_test_cases,
+)
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.logging_utils import configure_logging
 from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, TestCase, UnifiedRequirementModel
@@ -112,10 +118,15 @@ def generate_docs(
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_checklist:\n{type(exc).__name__}: {exc}\n")
             checklist = fallback_checklist(unified, max_items=n_items)
+        quality_report = evaluate_checklist_items(checklist)
+        checklist = apply_quality_marks_to_checklist(checklist, quality_report)
         checklist_json = sdir / _focused_name("checklist.json", focus)
+        quality_json = sdir / _focused_name("checklist-quality-report.json", focus)
         save_json(checklist_json, [c.model_dump() for c in checklist])
+        save_json(quality_json, quality_report)
         export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus))
         state.checklist_path = str(checklist_json)
+        state.quality_report_path = str(quality_json)
         state.test_cases_path = None
         state.dedup_report_path = None
         state.bug_reports_path = None
@@ -142,6 +153,8 @@ def generate_docs(
         test_cases, dedup_report = deduplicate_test_cases(test_cases)
         dedup_json = sdir / _focused_name("dedup-report.json", focus)
         save_json(dedup_json, dedup_report)
+        quality_report = evaluate_test_cases(test_cases)
+        test_cases = apply_quality_marks_to_test_cases(test_cases, quality_report)
         if do_bugs:
             try:
                 bug_templates = retry_attempts(2, lambda: generate_bug_report_templates(llm, test_cases))
@@ -152,14 +165,17 @@ def generate_docs(
                 bug_templates = []
 
         test_cases_json = sdir / _focused_name("test-cases.json", focus)
+        quality_json = sdir / _focused_name("test-cases-quality-report.json", focus)
         bugs_json = sdir / _focused_name("bug-reports.json", focus)
         save_json(test_cases_json, [t.model_dump() for t in test_cases])
+        save_json(quality_json, quality_report)
         save_json(bugs_json, [b.model_dump() for b in bug_templates])
         export_test_cases_local(sdir, test_cases, cfg.test_cases_export, filename_prefix=_focused_prefix("test-cases", focus))
         export_bug_reports_local(sdir, bug_templates, filename_prefix=_focused_prefix("bug-reports", focus))
 
         state.test_cases_path = str(test_cases_json)
         state.dedup_report_path = str(dedup_json)
+        state.quality_report_path = str(quality_json)
         state.bug_reports_path = str(bugs_json)
         state.checklist_path = None
 

@@ -15,7 +15,7 @@ from ai_qahelper.models import BugReport, ChecklistItem, ManualExecutionResult, 
 # В выгрузке таблицы эти поля всегда пустые — их заполняет исполнитель (как в шаблоне TestRail/Excel).
 _EXPORT_BLANK_EXECUTOR_FIELDS = frozenset({"environment", "status", "bug_report_id"})
 
-_CHECKLIST_EXPORT_KEYS = ["item_id", "area", "check", "expected_result", "priority", "source_refs"]
+_CHECKLIST_EXPORT_KEYS = ["item_id", "area", "check", "expected_result", "priority", "note", "source_refs"]
 
 _STEP_LEADING_ENUM = re.compile(r"^\s*\d+[\.)]\s+")
 
@@ -104,6 +104,7 @@ def export_checklist_local(
             "check": item.check,
             "expected_result": item.expected_result,
             "priority": item.priority,
+            "note": item.note,
             "source_refs": "; ".join(item.source_refs),
         }
         for item in checklist_items

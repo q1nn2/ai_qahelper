@@ -228,6 +228,14 @@ def _focus_instruction(focus: str) -> str:
     return hints.get(focus, "Фокус: general. Покрой требования сбалансированно.")
 
 
+_BAD_QA_PHRASES = (
+    "Запрещённые общие формулировки: «проверить корректность», «работает корректно», "
+    "«работает правильно», «система работает», «данные обрабатываются корректно», "
+    "«отображается корректно», «проверить функциональность», «всё работает», "
+    "«ошибка отображается» без причины/места/условия, «проверить UI» без конкретного элемента."
+)
+
+
 def generate_checklist(
     llm: LlmClient,
     model: UnifiedRequirementModel,
@@ -244,13 +252,20 @@ def generate_checklist(
         "Each checklist item must use keys: item_id, area, check, expected_result, priority, note, source_refs. "
         "All human-readable fields must be in Russian. "
         "Checklist is concise: each item is one check line, not a detailed step-by-step test case. "
-        "Keep items professional, executable, and grounded only in provided requirements and analysis."
+        "Keep items professional, executable, atomic, and grounded only in provided requirements and analysis. "
+        "Each checklist item is exactly one concrete check with one observable expected_result and source_refs. "
+        "Never use vague QA filler phrases."
     )
     user_parts = [
         f"Сгенерируй ровно {max_items} пунктов чек-листа (не меньше и не больше).",
-        "Один пункт = одна проверка. Не превращай чек-лист в пошаговый тест-кейс.",
-        "В check — краткая формулировка проверки для исполнителя. В expected_result — ожидаемый итог этой проверки.",
+        "Один пункт = одна конкретная проверка одного элемента/правила/состояния. Не превращай чек-лист в пошаговый тест-кейс.",
+        "В check — краткая формулировка проверки для исполнителя. В expected_result — конкретный наблюдаемый итог этой проверки.",
         "Расставь priority по важности: low / medium / high / critical.",
+        "Каждый item должен иметь source_refs. Если данных не хватает, укажи gap/risk в note, не придумывай правило.",
+        "Expected_result должен описывать наблюдаемый результат: кнопка активна/неактивна, сообщение отображается, поле подсвечено, пользователь остаётся на странице или перенаправляется.",
+        "Пример хорошего item: check=\"Проверить, что кнопка 'Войти' неактивна при пустом обязательном поле Email\"; expected_result=\"Кнопка 'Войти' остаётся неактивной, пока обязательное поле Email пустое\".",
+        "Плохой item: «Проверить корректность авторизации».",
+        _BAD_QA_PHRASES,
     ]
     if focus != "general":
         user_parts.append(_focus_instruction(focus))
@@ -291,7 +306,9 @@ def generate_test_cases(
         "Each object uses keys: case_id, title, preconditions, steps, expected_result, environment, status, bug_report_id, note, source_refs. "
         "All human-readable fields MUST be in Russian. "
         "environment, status, and bug_report_id MUST be empty strings. "
-        "Steps must be concrete, executable, and atomic. One test case = one verification."
+        "Steps must be concrete, executable, and atomic. One test case = one verification. "
+        "Every test case must be understandable for manual execution and suitable for future automation. "
+        "Do not invent business rules that are absent from requirements, site model, analysis, or consistency findings."
     )
     if analysis is not None and analysis.test_conditions:
         system += (
@@ -300,7 +317,16 @@ def generate_test_cases(
 
     user_parts = [
         f"Сгенерируй ровно {max_cases} различных тест-кейсов (не меньше и не больше).",
-        "Каждый кейс проверяет ровно одну вещь (одно значение, одно правило, одно сообщение) — не склеивай проверки.",
+        "Строгий QA-standard: каждый кейс проверяет ровно одну конкретную вещь (одно значение, одно правило, одно сообщение, одно состояние) — не склеивай проверки.",
+        "Название должно содержать конкретный объект проверки, не «Проверка формы» и не «Проверка функциональности».",
+        "Предусловия должны быть конкретными: где находится пользователь, какое состояние/данные уже подготовлены.",
+        "Шаги должны быть конкретными и исполнимыми. Если есть ввод, укажи конкретные тестовые данные.",
+        "Expected_result должен быть наблюдаемым: кнопка активна/неактивна, сообщение отображается, пользователь остаётся на странице, пользователь перенаправляется, поле подсвечивается, значение сохраняется, API-запрос завершается конкретным статусом, если API описан.",
+        "Если точный текст ошибки неизвестен, пиши: «отображается сообщение об ошибке о причине невалидного значения», не выдумывай точную строку.",
+        "Для negative cases указывай конкретное невалидное значение. Для boundary cases указывай конкретную границу только если она есть в требованиях.",
+        "Если данных не хватает — добавляй gap/risk в note, а не придумывай правило.",
+        "Каждый кейс должен иметь source_refs. Для Site Discovery case в note укажи, что кейс основан на фактически найденном UI, а не на продуктовых требованиях.",
+        _BAD_QA_PHRASES,
         "Все формулировки для исполнителя — на русском языке.",
         "Поля environment, status и bug_report_id оставь пустыми строками \"\".",
         "URL стенда при необходимости укажи в предусловиях, не в environment.",

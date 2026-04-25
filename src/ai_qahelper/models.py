@@ -240,6 +240,7 @@ class SessionState(BaseModel):
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
     input_coverage_report_path: str | None = None
+    quality_report_path: str | None = None
     checklist_path: str | None = None
     test_cases_path: str | None = None
     dedup_report_path: str | None = None
