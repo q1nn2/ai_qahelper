@@ -44,6 +44,7 @@ def collect_artifacts(results: list[dict]) -> list[str]:
         "test_analysis_path",
         "site_model_path",
         "exploratory_report_path",
+        "exploratory_report_md_path",
         "checklist_path",
         "test_cases_path",
         "bug_reports_path",

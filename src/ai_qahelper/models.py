@@ -230,6 +230,7 @@ class SessionState(BaseModel):
     figma_file_key: str | None = None
     site_model_path: str | None = None
     exploratory_report_path: str | None = None
+    exploratory_report_md_path: str | None = None
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None

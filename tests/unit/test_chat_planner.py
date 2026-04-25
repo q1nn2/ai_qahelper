@@ -153,6 +153,19 @@ def test_site_discovery_smoke_plan() -> None:
     assert result.plan.actions[1].focus == "smoke"
 
 
+def test_site_discovery_accessibility_plan() -> None:
+    context = ChatContext(target_url="https://example.com")
+
+    result = plan_message(
+        "Проверь сайт без требований и проверь accessibility basics",
+        context,
+        allow_llm=False,
+    )
+
+    assert [action.type for action in result.plan.actions[:2]] == ["discover_site", "generate_docs"]
+    assert result.plan.actions[1].focus == "accessibility"
+
+
 def test_prepare_bugs_without_auto_results_generates_bug_templates(monkeypatch) -> None:
     calls: list[str] = []
 

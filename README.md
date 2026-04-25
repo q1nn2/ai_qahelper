@@ -103,13 +103,18 @@ ai-qahelper-chat
 
 В этом режиме агент безопасно обходит внутренние ссылки same-domain с лимитами `max_pages` и `max_depth`, не ходит по внешним доменам, `mailto:`, `tel:`, `javascript:` и файлам вроде PDF/ZIP/картинок. В Streamlit chat sidebar можно задать `max_pages`, `max_depth`, `same_domain_only`, `use_playwright`, `timeout_seconds` и создание screenshots.
 
+Discovery работает в safe/read-only mode: не отправляет формы, не нажимает submit, не меняет данные, не оформляет заказы и не выполняет destructive actions. Если найден `robots.txt`, crawler учитывает базовые `Disallow` для `User-agent: *`; если найден `sitemap.xml` или sitemap указан в `robots.txt`, URL из sitemap используются как кандидаты, но всё равно ограничиваются `max_pages` и same-domain правилами.
+
+Если страниц больше, чем `max_pages`, crawler сначала выбирает QA-важные ссылки: login / вход, register / регистрация, catalog / каталог, cart / корзина, checkout / оформление, order / заказ, payment / оплата, profile / профиль, search / поиск, contacts / контакты, feedback, support.
+
 В результате создаются:
 
 - `site-model.json` — страницы, заголовки, ссылки, формы, поля, кнопки, alt-тексты изображений, видимый текст, HTTP status, console errors, network failures и summary.
-- `exploratory-report.json` — inventory навигации и форм, риски/пробелы, suggested test areas и limitations.
+- `exploratory-report.json` — inventory навигации и форм, accessibility basics, риски/пробелы, suggested test areas и limitations.
+- `exploratory-report.md` — читаемый QA-отчёт: цель анализа, страницы, формы, поля, кнопки, console/network ошибки, accessibility risks, suggested areas, limitations и предупреждение, что это фактический UI, а не требования продукта.
 - `unified-model.json` — synthetic model для обычной генерации документов.
 
-Если доступен Playwright, discovery дополнительно собирает screenshots, console errors и network failures. Если Playwright недоступен, используется fallback на `httpx` + HTML parsing.
+Если доступен Playwright, discovery использует один browser/context на весь crawl и дополнительно собирает screenshots, console errors и network failures. Если Playwright недоступен, используется fallback на `httpx` + HTML parsing.
 
 Ограничения режима: нет проверки бизнес-правил, нет авторизации, нет изменения данных на сайте, анализируется только видимый UI в пределах заданных лимитов. В ответе агент явно предупреждает: тест-кейсы созданы по фактическому поведению сайта, а не по требованиям.
 
