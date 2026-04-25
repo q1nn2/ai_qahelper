@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from ai_qahelper.config import load_config
+from ai_qahelper.deduplication import deduplicate_test_cases
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.logging_utils import configure_logging
 from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, TestCase, UnifiedRequirementModel
@@ -116,6 +117,7 @@ def generate_docs(
         export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus))
         state.checklist_path = str(checklist_json)
         state.test_cases_path = None
+        state.dedup_report_path = None
         state.bug_reports_path = None
     else:
         try:
@@ -137,6 +139,9 @@ def generate_docs(
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_test_cases:\n{type(exc).__name__}: {exc}\n")
             test_cases = fallback_test_cases(unified, max_cases=n_items)
+        test_cases, dedup_report = deduplicate_test_cases(test_cases)
+        dedup_json = sdir / _focused_name("dedup-report.json", focus)
+        save_json(dedup_json, dedup_report)
         if do_bugs:
             try:
                 bug_templates = retry_attempts(2, lambda: generate_bug_report_templates(llm, test_cases))
@@ -154,6 +159,7 @@ def generate_docs(
         export_bug_reports_local(sdir, bug_templates, filename_prefix=_focused_prefix("bug-reports", focus))
 
         state.test_cases_path = str(test_cases_json)
+        state.dedup_report_path = str(dedup_json)
         state.bug_reports_path = str(bugs_json)
         state.checklist_path = None
 

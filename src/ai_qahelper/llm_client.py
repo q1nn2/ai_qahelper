@@ -207,3 +207,72 @@ class LlmClient:
                 parts_out.append(f"### Страницы {first_p}–{last_p}\n{choice.strip()}")
 
         return "\n\n".join(parts_out)
+
+    def describe_images_for_requirements(
+        self,
+        images: list[tuple[str, bytes]],
+        *,
+        images_per_batch: int = 2,
+        max_output_tokens: int = 4096,
+    ) -> str:
+        """Describe images extracted from requirement documents for QA analysis."""
+        if not images:
+            return ""
+
+        system = (
+            "Ты QA assistant. По изображениям из документа требований опиши всё важное для тестирования: "
+            "UI-элементы, поля, кнопки, тексты, состояния, ошибки, таблицы, схемы переходов, ограничения "
+            "и видимые бизнес-правила. Не придумывай то, чего не видно. Структурируй по изображениям."
+        )
+        parts_out: list[str] = []
+        batch_size = max(1, images_per_batch)
+        for start in range(0, len(images), batch_size):
+            chunk = images[start : start + batch_size]
+            names = ", ".join(name for name, _ in chunk)
+            user_content: list[dict[str, Any]] = [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Изображения из Word-документа требований: {names}. "
+                        "Дай структурированное описание для тест-дизайна."
+                    ),
+                }
+            ]
+            for filename, data in chunk:
+                mime = _guess_image_mime(filename)
+                b64 = base64.standard_b64encode(data).decode("ascii")
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "auto"},
+                    }
+                )
+
+            logger.info("chat.completions vision: model=%s docx_images=%s", self._vision_model, names)
+            resp = self._client.chat.completions.create(
+                model=self._vision_model,
+                temperature=min(self._temperature, 0.4),
+                max_tokens=max_output_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_content},
+                ],
+            )
+            choice = resp.choices[0].message.content
+            if choice and choice.strip():
+                parts_out.append(choice.strip())
+
+        return "\n\n".join(parts_out)
+
+
+def _guess_image_mime(filename: str) -> str:
+    lower = filename.lower()
+    if lower.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    if lower.endswith(".bmp"):
+        return "image/bmp"
+    return "image/png"

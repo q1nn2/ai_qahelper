@@ -77,7 +77,17 @@ def ingest(
     if allowed and target_netloc not in allowed:
         raise RuntimeError(f"Target URL '{target_url}' is not in allowed environments: {allowed}")
 
-    req_items = parse_requirements(requirements, cfg_ingest) if requirements else []
+    input_coverage_path = sdir / "input-coverage-report.json"
+    req_items = (
+        parse_requirements(
+            requirements,
+            cfg_ingest,
+            coverage_report_path=input_coverage_path,
+            session_dir=sdir,
+        )
+        if requirements
+        else []
+    )
     req_items.extend(parse_requirement_url(url) for url in requirement_urls)
 
     design = retry_attempts(2, lambda: ingest_figma(figma_file_key)) if figma_file_key else None
@@ -92,6 +102,7 @@ def ingest(
         requirements_files=requirements + requirement_urls,
         figma_file_key=figma_file_key,
         unified_model_path=str(unified_path),
+        input_coverage_report_path=str(input_coverage_path) if requirements else None,
     )
     save_session(state)
     return session_id

@@ -78,10 +78,12 @@ def agent_run(
     result = {
         "session_id": session_id,
         "unified_model_path": state.unified_model_path,
+        "input_coverage_report_path": state.input_coverage_report_path,
         "consistency_report_path": state.consistency_report_path,
         "test_analysis_path": state.test_analysis_path,
         "checklist_path": state.checklist_path,
         "test_cases_path": state.test_cases_path,
+        "dedup_report_path": state.dedup_report_path,
         "bug_reports_path": state.bug_reports_path,
         "artifact_type": artifact_type,
         "summary": summary,

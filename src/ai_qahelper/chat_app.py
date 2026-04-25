@@ -9,6 +9,8 @@ import streamlit as st
 from ai_qahelper.chat_agent import ChatContext, ChatResponse, handle_message
 from ai_qahelper.chat_planner import ChatPlan
 
+SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
+
 
 def _init_state() -> None:
     st.session_state.setdefault("messages", [])
@@ -48,10 +50,10 @@ def _save_uploaded_files(uploaded_files: list[Any]) -> list[str]:
 
 def _render_sidebar() -> list[str]:
     st.sidebar.header("Контекст")
-    st.sidebar.caption("Файлы требований, .md/.txt/.pdf")
+    st.sidebar.caption("Файлы требований: .md/.txt/.pdf/.docx/.xlsx/.xls")
     uploaded_files = st.sidebar.file_uploader(
         "Загрузить требования",
-        type=["md", "txt", "pdf"],
+        type=SUPPORTED_UPLOAD_TYPES,
         accept_multiple_files=True,
         label_visibility="collapsed",
     )

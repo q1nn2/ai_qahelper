@@ -76,6 +76,11 @@ class LlmConfig(BaseModel):
     pdf_vision_max_pages: int = 40
     pdf_vision_pages_per_request: int = 2
     pdf_vision_max_output_tokens: int = 4096
+    # Vision: изображения, встроенные в Word DOCX с требованиями.
+    docx_vision: bool = True
+    docx_vision_max_images: int = 30
+    docx_vision_images_per_request: int = 2
+    docx_vision_max_output_tokens: int = 4096
     # Масштаб рендера страницы (2 ≈ ~144 DPI при 72 pt); больше — чётче, но тяжелее для API.
     pdf_vision_render_scale: float = 2.0
     # responses.create с text.format json_schema (Structured Outputs); при ошибке — fallback на разбор текста.
@@ -234,8 +239,10 @@ class SessionState(BaseModel):
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
+    input_coverage_report_path: str | None = None
     checklist_path: str | None = None
     test_cases_path: str | None = None
+    dedup_report_path: str | None = None
     bug_reports_path: str | None = None
     generated_tests_dir: str | None = None
     manual_results_path: str | None = None

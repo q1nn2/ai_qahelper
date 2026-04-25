@@ -40,6 +40,7 @@ class PlanExecutor:
 def collect_artifacts(results: list[dict]) -> list[str]:
     keys = [
         "unified_model_path",
+        "input_coverage_report_path",
         "consistency_report_path",
         "test_analysis_path",
         "site_model_path",
@@ -47,6 +48,7 @@ def collect_artifacts(results: list[dict]) -> list[str]:
         "exploratory_report_md_path",
         "checklist_path",
         "test_cases_path",
+        "dedup_report_path",
         "bug_reports_path",
         "generated_tests_dir",
         "manual_results_path",
