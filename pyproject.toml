@@ -24,6 +24,7 @@ dependencies = [
     "gspread>=6",
     "google-auth>=2",
     "python-dotenv>=1.0",
+    "streamlit>=1.35",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ autotest = ["pytest>=8", "pytest-html>=4", "playwright>=1.40"]
 
 [project.scripts]
 ai-qahelper = "ai_qahelper.cli:run_cli"
+ai-qahelper-chat = "ai_qahelper.chat_launcher:run_chat"
 
 [tool.setuptools.packages.find]
 where = ["src"]
