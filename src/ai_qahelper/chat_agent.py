@@ -3,15 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ai_qahelper.orchestrator import (
-    agent_run,
-    create_bug_drafts_from_failures,
-    generate_autotests,
-    generate_docs,
-    run_autotests,
-    run_manual,
-    sync_reports,
-)
+from ai_qahelper.chat_executor import PlanExecutor, collect_artifacts
+from ai_qahelper.chat_planner import ChatPlan, PlannerResult, plan_message
 
 Intent = Literal[
     "agent_run",
@@ -46,109 +39,108 @@ class ChatResponse:
     message: str
     intent: Intent = "unknown"
     needs_confirmation: bool = False
+    plan: ChatPlan | None = None
+    results: list[dict] = field(default_factory=list)
+    warning: str = ""
 
 
-def detect_intent(message: str) -> Intent:
-    text = message.lower()
-    if any(x in text for x in ("помощ", "help", "что умеешь")):
-        return "help"
-    if any(x in text for x in ("выгруз", "google sheets", "таблиц")):
-        return "sync_reports"
-    if any(x in text for x in ("баг", "bug", "дефект")):
-        return "draft_bugs"
-    if any(x in text for x in ("запусти автотест", "прогони автотест", "pytest", "run-autotest")):
-        return "run_autotests"
-    if any(x in text for x in ("автотест", "playwright")):
-        return "generate_autotests"
-    if any(x in text for x in ("ручной прогон", "manual")):
-        return "run_manual"
-    if any(x in text for x in ("обнови", "перегенер", "generate-docs")):
-        return "generate_docs"
-    if any(x in text for x in ("тест-кейс", "тест кейс", "чек-лист", "чеклист", "тестовую документац", "сделай тест")):
-        return "agent_run"
-    return "unknown"
-
-
-def format_state(data: dict) -> str:
+def format_plan(plan: ChatPlan) -> str:
+    if not plan.actions:
+        return "План пуст."
     names = {
-        "session_id": "Сессия",
-        "test_cases_path": "Тест-кейсы",
-        "checklist_path": "Чек-лист",
-        "test_analysis_path": "Тест-анализ",
-        "consistency_report_path": "Consistency report",
-        "bug_reports_path": "Баг-репорты",
-        "generated_tests_dir": "Автотесты",
-        "manual_results_path": "Ручной прогон",
-        "auto_results_path": "Результаты автотестов",
-        "html_report_path": "HTML-отчёт",
+        "agent_run": "Анализ требований и базовая генерация",
+        "generate_docs": "Генерация документации",
+        "run_manual": "Шаблон ручного прогона",
+        "generate_autotests": "Подготовка автотестов",
+        "run_autotests": "Запуск автотестов",
+        "draft_bugs": "Черновики баг-репортов",
+        "sync_reports": "Выгрузка в Google Sheets",
+        "help": "Справка",
     }
-    lines: list[str] = []
-    for key, title in names.items():
-        value = data.get(key)
-        if value:
-            lines.append(f"- {title}: `{value}`")
-    summary = data.get("summary")
-    if summary:
-        lines.append("- Сводка: " + ", ".join(f"{k}: {v}" for k, v in summary.items()))
+    lines = []
+    for idx, action in enumerate(plan.actions, start=1):
+        suffix = ""
+        if action.focus != "general":
+            suffix += f" ({action.focus})"
+        if action.artifact_type != "none":
+            suffix += f" [{action.artifact_type}]"
+        if action.requires_confirmation:
+            suffix += " — требует подтверждения"
+        lines.append(f"{idx}. {names[action.type]}{suffix}")
     return "\n".join(lines)
 
 
-def handle_message(context: ChatContext, message: str, *, confirmed: bool = False) -> ChatResponse:
-    intent = detect_intent(message)
-    if intent == "help":
+def handle_message(
+    context: ChatContext,
+    message: str,
+    *,
+    confirmed: bool = False,
+    plan: ChatPlan | None = None,
+    allow_llm: bool = True,
+    executor: PlanExecutor | None = None,
+) -> ChatResponse:
+    planner_result: PlannerResult | None = None
+    if plan is None:
+        planner_result = plan_message(message, context, allow_llm=allow_llm)
+        plan = planner_result.plan
+
+    if plan.needs_clarification:
+        return ChatResponse(plan.clarification_question or "Нужно уточнение перед выполнением.", "unknown", plan=plan)
+
+    if plan.actions and plan.actions[0].type == "help":
         return ChatResponse(
             "Пишите обычным языком: `сделай тест-кейсы`, `сделай чек-лист`, "
             "`подготовь автотесты`, `запусти автотесты`, `создай баг-репорты`, `выгрузи в Google Sheets`.",
-            intent,
+            "help",
+            plan=plan,
         )
-    if intent == "unknown":
-        return ChatResponse("Не понял действие. Напишите, например: `сделай тест-кейсы` или `запусти автотесты`.", intent)
 
+    if any(action.requires_confirmation for action in plan.actions) and not confirmed:
+        warning = planner_result.warning if planner_result else ""
+        prefix = (warning + "\n\n") if warning else ""
+        return ChatResponse(
+            prefix
+            + "Понял задачу. План:\n"
+            + format_plan(plan)
+            + "\n\nНужно подтверждение перед выполнением опасных действий.",
+            plan.actions[0].type if plan.actions else "unknown",
+            needs_confirmation=True,
+            plan=plan,
+            warning=warning,
+        )
+
+    warning = planner_result.warning if planner_result else ""
     try:
-        if intent == "agent_run":
-            if "чек" in message.lower():
-                context.output = "checklist"
-            data = agent_run(
-                context.requirements,
-                context.requirement_urls,
-                context.figma_file_key,
-                target_url=context.target_url,
-                max_cases=context.max_cases,
-                with_bug_drafts=context.with_bug_drafts,
-                skip_test_analysis=True if context.skip_test_analysis else None,
-                artifact_type=context.output,
-            )
-            context.session_id = data.get("session_id")
-            return ChatResponse("Готово.\n\n" + format_state(data), intent)
-
-        if not context.session_id:
-            return ChatResponse("Сначала создайте сессию: загрузите требования и напишите `сделай тест-кейсы`.", intent)
-
-        if intent == "generate_docs":
-            state = generate_docs(context.session_id, max_cases=context.max_cases, artifact_type=context.output)
-            return ChatResponse("Документация обновлена.\n\n" + format_state(state.model_dump(mode="json")), intent)
-        if intent == "run_manual":
-            state = run_manual(context.session_id)
-            return ChatResponse("Шаблон ручного прогона создан.\n\n" + format_state(state.model_dump(mode="json")), intent)
-        if intent == "generate_autotests":
-            state = generate_autotests(context.session_id)
-            return ChatResponse("Автотесты подготовлены.\n\n" + format_state(state.model_dump(mode="json")), intent)
-        if intent == "run_autotests":
-            if not confirmed:
-                return ChatResponse("Подтвердите запуск автотестов кнопкой ниже.", intent, needs_confirmation=True)
-            state = run_autotests(context.session_id)
-            return ChatResponse("Автотесты запущены.\n\n" + format_state(state.model_dump(mode="json")), intent)
-        if intent == "draft_bugs":
-            state = create_bug_drafts_from_failures(context.session_id)
-            return ChatResponse("Баг-репорты созданы.\n\n" + format_state(state.model_dump(mode="json")), intent)
-        if intent == "sync_reports":
-            if not context.test_cases_sheet_url or not context.bug_reports_sheet_url:
-                return ChatResponse("Добавьте ссылки Google Sheets в боковой панели и повторите команду.", intent)
-            if not confirmed:
-                return ChatResponse("Подтвердите выгрузку в Google Sheets кнопкой ниже.", intent, needs_confirmation=True)
-            data = sync_reports(context.session_id, context.test_cases_sheet_url, context.bug_reports_sheet_url)
-            return ChatResponse("Выгрузка завершена.\n\n" + format_state(data), intent)
+        results = (executor or PlanExecutor()).execute(context, plan, message)
     except Exception as exc:  # noqa: BLE001
-        return ChatResponse(f"Ошибка при выполнении `{intent}`: {type(exc).__name__}: {exc}", intent)
+        action_type = plan.actions[0].type if plan.actions else "unknown"
+        return ChatResponse(f"Ошибка при выполнении `{action_type}`: {type(exc).__name__}: {exc}", action_type, plan=plan)
 
-    return ChatResponse("Действие пока не поддерживается.", intent)
+    lines: list[str] = []
+    if warning:
+        lines.append(warning)
+        lines.append("")
+    lines.append("Понял задачу. План:")
+    lines.append(format_plan(plan))
+    lines.append("")
+    lines.append("Готово.")
+    if context.session_id:
+        lines.append(f"Session ID: `{context.session_id}`")
+    artifacts = collect_artifacts(results)
+    if artifacts:
+        lines.append("Артефакты:")
+        lines.extend(f"- {path}" for path in artifacts)
+    if results:
+        lines.append("")
+        lines.append("Результаты шагов:")
+        for idx, item in enumerate(results, start=1):
+            title = item.get("title") or item.get("action") or f"Шаг {idx}"
+            lines.append(f"{idx}. {title}: готово")
+
+    return ChatResponse(
+        "\n".join(lines),
+        plan.actions[0].type if plan.actions else "unknown",
+        plan=plan,
+        results=results,
+        warning=warning,
+    )

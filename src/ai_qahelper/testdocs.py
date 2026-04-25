@@ -213,6 +213,21 @@ def _consistency_digest_for_prompt(consistency_report: dict[str, Any] | None, ma
     return json.dumps(slim, ensure_ascii=False, indent=2)
 
 
+def _focus_instruction(focus: str) -> str:
+    hints = {
+        "smoke": "Фокус: smoke. Покрой только критический happy path и базовую доступность основных функций.",
+        "regression": "Фокус: regression. Покрой основные устойчивые сценарии, которые важно повторять перед релизом.",
+        "negative": "Фокус: negative. Делай упор на ошибки, невалидные данные, пустые поля и отказные сценарии.",
+        "api": "Фокус: API. Проверяй контракты, статусы ответов, обязательные параметры и обработку ошибок API.",
+        "ui": "Фокус: UI. Проверяй отображение, состояния элементов, тексты, навигацию и UX-серые зоны.",
+        "mobile": "Фокус: mobile. Учитывай мобильные экраны, адаптивность, touch-сценарии и платформенные различия.",
+        "security": "Фокус: security. Проверяй доступы, приватность данных, некорректные права и безопасную обработку ввода.",
+        "performance": "Фокус: performance. Проверяй скорость, задержки, тяжёлые сценарии и деградацию под нагрузкой.",
+        "accessibility": "Фокус: accessibility. Проверяй клавиатурную навигацию, labels, контрастность и screen reader сценарии.",
+    }
+    return hints.get(focus, "Фокус: general. Покрой требования сбалансированно.")
+
+
 def generate_checklist(
     llm: LlmClient,
     model: UnifiedRequirementModel,
@@ -221,6 +236,7 @@ def generate_checklist(
     *,
     llm_cfg: LlmConfig,
     analysis: TestAnalysisReport | None = None,
+    focus: str = "general",
 ) -> list[ChecklistItem]:
     system = (
         "You are a senior QA engineer. Reply with a single JSON object only. "
@@ -236,6 +252,8 @@ def generate_checklist(
         "В check — краткая формулировка проверки для исполнителя. В expected_result — ожидаемый итог этой проверки.",
         "Расставь priority по важности: low / medium / high / critical.",
     ]
+    if focus != "general":
+        user_parts.append(_focus_instruction(focus))
     if analysis is not None:
         user_parts.append("Тест-анализ (JSON):\n" + _analysis_digest_for_prompt(analysis, llm_cfg.max_analysis_json_chars))
         if analysis.test_conditions:
@@ -261,6 +279,7 @@ def generate_test_cases(
     llm_cfg: LlmConfig,
     export_columns: list[TestCaseExportColumn] | None = None,
     analysis: TestAnalysisReport | None = None,
+    focus: str = "general",
 ) -> list[TestCase]:
     class Payload(BaseModel):
         test_cases: list[TestCase]
@@ -286,6 +305,8 @@ def generate_test_cases(
         "Поля environment, status и bug_report_id оставь пустыми строками \"\".",
         "URL стенда при необходимости укажи в предусловиях, не в environment.",
     ]
+    if focus != "general":
+        user_parts.append(_focus_instruction(focus))
     if analysis is not None:
         user_parts.append("Тест-анализ (JSON):\n" + _analysis_digest_for_prompt(analysis, llm_cfg.max_analysis_json_chars))
         if analysis.test_conditions:

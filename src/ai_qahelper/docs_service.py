@@ -7,7 +7,7 @@ from typing import Literal
 from ai_qahelper.config import load_config
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.logging_utils import configure_logging
-from ai_qahelper.models import BugReport, ChecklistItem, SessionState, TestAnalysisReport, UnifiedRequirementModel
+from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, UnifiedRequirementModel
 from ai_qahelper.quality import check_consistency
 from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local, save_json
 from ai_qahelper.session_service import load_session, retry_attempts, save_session, session_path
@@ -24,6 +24,25 @@ from ai_qahelper.testdocs import (
 logger = logging.getLogger(__name__)
 
 ArtifactType = Literal["testcases", "checklist"]
+GenerationFocus = Literal[
+    "smoke",
+    "regression",
+    "negative",
+    "api",
+    "ui",
+    "mobile",
+    "security",
+    "performance",
+    "accessibility",
+    "general",
+]
+
+
+def _focused_name(base_name: str, focus: str) -> str:
+    if focus == "general":
+        return base_name
+    stem, suffix = base_name.rsplit(".", 1)
+    return f"{stem}-{focus}.{suffix}"
 
 
 def generate_docs(
@@ -32,6 +51,7 @@ def generate_docs(
     generate_bug_templates: bool | None = None,
     skip_test_analysis: bool | None = None,
     artifact_type: ArtifactType = "testcases",
+    focus: GenerationFocus = "general",
 ) -> SessionState:
     cfg = load_config()
     do_bugs = cfg.generate_bug_templates if generate_bug_templates is None else generate_bug_templates
@@ -78,6 +98,7 @@ def generate_docs(
                     llm_cfg=cfg.llm,
                     analysis=analysis if run_analysis and analysis is not None else fallback_test_analysis(unified, consistency),
                     max_items=n_items,
+                    focus=focus,
                 ),
             )
         except Exception as exc:
@@ -85,7 +106,7 @@ def generate_docs(
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_checklist:\n{type(exc).__name__}: {exc}\n")
             checklist = fallback_checklist(unified, max_items=n_items)
-        checklist_json = sdir / "checklist.json"
+        checklist_json = sdir / _focused_name("checklist.json", focus)
         save_json(checklist_json, [c.model_dump() for c in checklist])
         export_checklist_local(sdir, checklist)
         state.checklist_path = str(checklist_json)
@@ -103,6 +124,7 @@ def generate_docs(
                     llm_cfg=cfg.llm,
                     export_columns=cfg.test_cases_export,
                     analysis=analysis if run_analysis else None,
+                    focus=focus,
                 ),
             )
         except Exception as exc:
@@ -119,8 +141,8 @@ def generate_docs(
                     f.write(f"\ngenerate_bug_report_templates:\n{type(exc).__name__}: {exc}\n")
                 bug_templates = []
 
-        test_cases_json = sdir / "test-cases.json"
-        bugs_json = sdir / "bug-reports.json"
+        test_cases_json = sdir / _focused_name("test-cases.json", focus)
+        bugs_json = sdir / _focused_name("bug-reports.json", focus)
         save_json(test_cases_json, [t.model_dump() for t in test_cases])
         save_json(bugs_json, [b.model_dump() for b in bug_templates])
         export_test_cases_local(sdir, test_cases, cfg.test_cases_export)
