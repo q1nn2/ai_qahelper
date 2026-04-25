@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -13,6 +14,7 @@ Intent = Literal[
     "generate_autotests",
     "run_autotests",
     "draft_bugs",
+    "generate_bug_templates",
     "sync_reports",
     "help",
     "unknown",
@@ -54,6 +56,7 @@ def format_plan(plan: ChatPlan) -> str:
         "generate_autotests": "Подготовка автотестов",
         "run_autotests": "Запуск автотестов",
         "draft_bugs": "Черновики баг-репортов",
+        "generate_bug_templates": "Черновики баг-репортов по требованиям",
         "sync_reports": "Выгрузка в Google Sheets",
         "help": "Справка",
     }
@@ -81,6 +84,7 @@ def handle_message(
 ) -> ChatResponse:
     planner_result: PlannerResult | None = None
     if plan is None:
+        update_context_from_message(context, message)
         planner_result = plan_message(message, context, allow_llm=allow_llm)
         plan = planner_result.plan
 
@@ -144,3 +148,76 @@ def handle_message(
         results=results,
         warning=warning,
     )
+
+
+_URL_RE = re.compile(r"https?://[^\s)\],;!]+")
+_FIGMA_KEY_RE = re.compile(r"figma\.com/(?:file|design)/([^/\s?]+)", re.IGNORECASE)
+_MAX_CASES_RE = re.compile(
+    r"(?:max[-_\s]?cases|максимум|до|ровно|сделай)\s*(\d+)|(\d+)\s*(?:тест[-_\s]?кейсов|кейсов|проверок|чек[-_\s]?лист)",
+    re.IGNORECASE,
+)
+
+
+def update_context_from_message(context: ChatContext, message: str) -> None:
+    urls = [_clean_url(url) for url in _URL_RE.findall(message)]
+    if not urls:
+        _extract_max_cases(context, message)
+        return
+
+    sheets = [url for url in urls if "docs.google.com/spreadsheets" in url.lower()]
+    if sheets:
+        context.test_cases_sheet_url = context.test_cases_sheet_url or sheets[0]
+        if len(sheets) > 1:
+            context.bug_reports_sheet_url = context.bug_reports_sheet_url or sheets[1]
+
+    figma_match = _FIGMA_KEY_RE.search(message)
+    if figma_match:
+        context.figma_file_key = context.figma_file_key or figma_match.group(1)
+
+    regular_urls = [
+        url
+        for url in urls
+        if "figma.com" not in url.lower() and "docs.google.com/spreadsheets" not in url.lower()
+    ]
+    target_url = _detect_target_url(message, regular_urls)
+    if target_url and not context.target_url:
+        context.target_url = target_url
+    for url in regular_urls:
+        if url != context.target_url and url not in context.requirement_urls:
+            context.requirement_urls.append(url)
+    _extract_max_cases(context, message)
+
+
+def _clean_url(url: str) -> str:
+    return url.rstrip(".,;!?)\"]}")
+
+
+def _extract_max_cases(context: ChatContext, message: str) -> None:
+    match = _MAX_CASES_RE.search(message)
+    if not match:
+        return
+    value = next((group for group in match.groups() if group), None)
+    if value:
+        context.max_cases = int(value)
+
+
+def _detect_target_url(message: str, urls: list[str]) -> str | None:
+    if not urls:
+        return None
+    lowered = message.lower()
+    target_markers = ("target", "сайт", "стенд", "приложение", "url стенда", "target url")
+    requirement_markers = ("требован", "requirement", "спека", "spec", "документ")
+    for url in urls:
+        before = lowered[: lowered.find(url.lower())]
+        window = before[-60:]
+        if any(marker in window for marker in target_markers):
+            return url
+    for url in urls:
+        before = lowered[: lowered.find(url.lower())]
+        window = before[-60:]
+        if not any(marker in window for marker in requirement_markers):
+            if len(urls) == 1:
+                return url
+    if len(urls) >= 2:
+        return urls[-1]
+    return None

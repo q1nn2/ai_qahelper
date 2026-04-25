@@ -16,6 +16,7 @@ ActionType = Literal[
     "generate_autotests",
     "run_autotests",
     "draft_bugs",
+    "generate_bug_templates",
     "sync_reports",
     "help",
 ]
@@ -41,6 +42,7 @@ SUPPORTED_ACTIONS: tuple[ActionType, ...] = (
     "generate_autotests",
     "run_autotests",
     "draft_bugs",
+    "generate_bug_templates",
     "sync_reports",
     "help",
 )
@@ -96,7 +98,8 @@ class PlannerResult(BaseModel):
 PLANNER_SYSTEM_PROMPT = """
 Ты AI QA Lead и test architect. Твоя задача — понять сообщение пользователя и вернуть строгий JSON-план.
 Не выполняй задачу сам. Используй только поддерживаемые action types:
-agent_run, generate_docs, run_manual, generate_autotests, run_autotests, draft_bugs, sync_reports, help.
+agent_run, generate_docs, run_manual, generate_autotests, run_autotests, draft_bugs, generate_bug_templates, sync_reports, help.
+draft_bugs используй только для багов по падениям автотестов. generate_bug_templates используй для черновиков багов по требованиям, рискам или тест-кейсам.
 
 Для каждого action верни поля:
 type, artifact_type, focus, max_cases, requires_confirmation, reason.
@@ -149,7 +152,21 @@ FALLBACK_ACTION_RULES: tuple[FallbackActionRule, ...] = (
         blocked_by=("запусти автотест", "прогони автотест", "run autotest"),
     ),
     FallbackActionRule("run_manual", "none", "general", ("ручной прогон", "manual"), "Пользователь просит ручной прогон"),
-    FallbackActionRule("draft_bugs", "none", "general", ("баг", "bug", "дефект"), "Пользователь просит подготовить баг-репорты"),
+    FallbackActionRule(
+        "draft_bugs",
+        "none",
+        "general",
+        ("баги по пад", "bug from fail", "failed autotest", "падениям", "падений", "упавшим автотест"),
+        "Пользователь просит подготовить баги по падениям автотестов",
+    ),
+    FallbackActionRule(
+        "generate_bug_templates",
+        "none",
+        "general",
+        ("баг", "bug", "дефект"),
+        "Пользователь просит подготовить черновики баг-репортов",
+        blocked_by=("баги по пад", "bug from fail", "failed autotest", "падениям", "падений", "упавшим автотест"),
+    ),
 )
 
 FALLBACK_DOC_ALIASES = (
@@ -220,33 +237,55 @@ def plan_message(
                 ),
                 ChatPlan,
             )
-            return PlannerResult(plan=_normalize_plan(plan, effective_output, effective_max_cases))
-        except Exception as exc:  # noqa: BLE001 - planner must gracefully fall back for chat UX
+            plan = _normalize_plan(plan, effective_output, effective_max_cases)
             return PlannerResult(
-                plan=fallback_plan_message(
-                    user_message,
-                    context,
+                plan=_apply_clarification_rules(
+                    plan,
                     requirements=effective_requirements,
                     requirement_urls=effective_requirement_urls,
                     target_url=effective_target_url,
                     session_id=effective_session_id,
-                    output=effective_output,
-                    max_cases=effective_max_cases,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - planner must gracefully fall back for chat UX
+            return PlannerResult(
+                plan=_apply_clarification_rules(
+                    fallback_plan_message(
+                        user_message,
+                        context,
+                        requirements=effective_requirements,
+                        requirement_urls=effective_requirement_urls,
+                        target_url=effective_target_url,
+                        session_id=effective_session_id,
+                        output=effective_output,
+                        max_cases=effective_max_cases,
+                    ),
+                    requirements=effective_requirements,
+                    requirement_urls=effective_requirement_urls,
+                    target_url=effective_target_url,
+                    session_id=effective_session_id,
                 ),
                 used_fallback=True,
                 warning=f"LLM planner недоступен, использую базовое распознавание команд. ({type(exc).__name__})",
             )
 
+    fallback_plan = fallback_plan_message(
+        user_message,
+        context,
+        requirements=effective_requirements,
+        requirement_urls=effective_requirement_urls,
+        target_url=effective_target_url,
+        session_id=effective_session_id,
+        output=effective_output,
+        max_cases=effective_max_cases,
+    )
     return PlannerResult(
-        plan=fallback_plan_message(
-            user_message,
-            context,
+        plan=_apply_clarification_rules(
+            fallback_plan,
             requirements=effective_requirements,
             requirement_urls=effective_requirement_urls,
             target_url=effective_target_url,
             session_id=effective_session_id,
-            output=effective_output,
-            max_cases=effective_max_cases,
         ),
         used_fallback=True,
         warning="LLM planner недоступен, использую базовое распознавание команд.",
@@ -282,7 +321,8 @@ def _build_user_prompt(
         "instructions": {
             "agent_run": "Use when a new session must be created from requirements and initial analysis/docs should run.",
             "generate_docs": "Use for additional testcases/checklist generation in a specific focus.",
-            "draft_bugs": "Use when the user asks to prepare bug reports.",
+            "draft_bugs": "Use only when the user asks to prepare bug reports from failed autotest results.",
+            "generate_bug_templates": "Use when the user asks for bug report drafts from requirements, risks, or generated test cases.",
             "generate_autotests": "Use when the user asks to prepare Playwright/pytest autotests but not run them.",
             "run_autotests": "Use only when the user explicitly asks to run autotests; requires confirmation.",
             "sync_reports": "Use only when the user asks to upload/sync to Google Sheets; requires confirmation.",
@@ -398,6 +438,59 @@ def _normalize_plan(plan: ChatPlan, default_output: str | None, default_max_case
     return plan
 
 
+def _apply_clarification_rules(
+    plan: ChatPlan,
+    *,
+    requirements: list[str],
+    requirement_urls: list[str],
+    target_url: str | None,
+    session_id: str | None,
+) -> ChatPlan:
+    if plan.needs_clarification:
+        return plan
+    new_session_actions = {"agent_run"}
+    session_bound_doc_actions = {"generate_docs", "generate_bug_templates", "generate_autotests", "run_manual"}
+    needs_new_session = any(action.type in new_session_actions for action in plan.actions)
+    can_start_from_inputs = bool(requirements or requirement_urls)
+    if not session_id and any(action.type in session_bound_doc_actions for action in plan.actions):
+        needs_new_session = True
+    if not needs_new_session:
+        return plan
+    if not can_start_from_inputs:
+        return plan.model_copy(
+            update={
+                "needs_clarification": True,
+                "clarification_question": "Загрузи требования или вставь текст требований.",
+            }
+        )
+    if not target_url:
+        return plan.model_copy(
+            update={
+                "needs_clarification": True,
+                "clarification_question": "Укажи target URL для новой сессии.",
+            }
+        )
+    if not any(action.type == "agent_run" for action in plan.actions):
+        first_doc = next((action for action in plan.actions if action.type in session_bound_doc_actions), None)
+        artifact_type = first_doc.artifact_type if first_doc and first_doc.artifact_type != "none" else "testcases"
+        plan = plan.model_copy(
+            update={
+                "actions": [
+                    PlanAction(
+                        type="agent_run",
+                        artifact_type=artifact_type,
+                        focus="general",
+                        max_cases=first_doc.max_cases if first_doc else None,
+                        requires_confirmation=False,
+                        reason="Создать сессию перед выполнением запрошенных действий",
+                    ),
+                    *plan.actions,
+                ]
+            }
+        )
+    return plan
+
+
 def _action(
     action_type: ActionType,
     artifact_type: ArtifactType,
@@ -499,6 +592,8 @@ def _build_goal(actions: list[PlanAction]) -> str:
             parts.append(f"{action.focus} {action.artifact_type}")
         elif action.type == "draft_bugs":
             parts.append("баг-репорты")
+        elif action.type == "generate_bug_templates":
+            parts.append("черновики баг-репортов")
         elif action.type == "generate_autotests":
             parts.append("автотесты")
         elif action.type == "run_autotests":
@@ -516,6 +611,7 @@ def _summary_for_actions(actions: list[PlanAction]) -> str:
         "generate_autotests": "подготовлю автотесты",
         "run_autotests": "запущу автотесты после подтверждения",
         "draft_bugs": "подготовлю баг-репорты",
+        "generate_bug_templates": "подготовлю черновики баг-репортов",
         "sync_reports": "выгружу отчёты после подтверждения",
         "help": "покажу справку",
     }

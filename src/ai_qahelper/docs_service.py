@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Literal
@@ -7,7 +8,7 @@ from typing import Literal
 from ai_qahelper.config import load_config
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.logging_utils import configure_logging
-from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, UnifiedRequirementModel
+from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, TestCase, UnifiedRequirementModel
 from ai_qahelper.quality import check_consistency
 from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local, save_json
 from ai_qahelper.session_service import load_session, retry_attempts, save_session, session_path
@@ -43,6 +44,10 @@ def _focused_name(base_name: str, focus: str) -> str:
         return base_name
     stem, suffix = base_name.rsplit(".", 1)
     return f"{stem}-{focus}.{suffix}"
+
+
+def _focused_prefix(base_prefix: str, focus: str) -> str:
+    return base_prefix if focus == "general" else f"{base_prefix}-{focus}"
 
 
 def generate_docs(
@@ -108,7 +113,7 @@ def generate_docs(
             checklist = fallback_checklist(unified, max_items=n_items)
         checklist_json = sdir / _focused_name("checklist.json", focus)
         save_json(checklist_json, [c.model_dump() for c in checklist])
-        export_checklist_local(sdir, checklist)
+        export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus))
         state.checklist_path = str(checklist_json)
         state.test_cases_path = None
         state.bug_reports_path = None
@@ -145,8 +150,8 @@ def generate_docs(
         bugs_json = sdir / _focused_name("bug-reports.json", focus)
         save_json(test_cases_json, [t.model_dump() for t in test_cases])
         save_json(bugs_json, [b.model_dump() for b in bug_templates])
-        export_test_cases_local(sdir, test_cases, cfg.test_cases_export)
-        export_bug_reports_local(sdir, bug_templates)
+        export_test_cases_local(sdir, test_cases, cfg.test_cases_export, filename_prefix=_focused_prefix("test-cases", focus))
+        export_bug_reports_local(sdir, bug_templates, filename_prefix=_focused_prefix("bug-reports", focus))
 
         state.test_cases_path = str(test_cases_json)
         state.bug_reports_path = str(bugs_json)
@@ -155,5 +160,36 @@ def generate_docs(
     state.consistency_report_path = str(consistency_json)
     if not run_analysis:
         state.test_analysis_path = None
+    save_session(state)
+    return state
+
+
+def generate_bug_templates_for_session(session_id: str, max_items: int = 20) -> SessionState:
+    cfg = load_config()
+    state = load_session(session_id)
+    if not state.test_cases_path:
+        state = generate_docs(session_id, generate_bug_templates=True, skip_test_analysis=True)
+        if not state.test_cases_path:
+            raise RuntimeError("No test cases found for bug template generation")
+    sdir = session_path(session_id)
+    configure_logging(sdir)
+    llm = LlmClient(cfg.llm)
+    test_cases = [
+        item
+        for item in json.loads(Path(state.test_cases_path).read_text(encoding="utf-8"))
+    ]
+    parsed_cases = [TestCase.model_validate(item) for item in test_cases]
+    try:
+        bug_templates = retry_attempts(2, lambda: generate_bug_report_templates(llm, parsed_cases, max_items=max_items))
+    except Exception as exc:
+        logger.exception("generate_bug_report_templates failed")
+        err_path = sdir / "llm-generation-errors.log"
+        with err_path.open("a", encoding="utf-8") as f:
+            f.write(f"\ngenerate_bug_templates_for_session:\n{type(exc).__name__}: {exc}\n")
+        bug_templates = []
+    bugs_json = sdir / "bug-reports.json"
+    save_json(bugs_json, [b.model_dump() for b in bug_templates])
+    export_bug_reports_local(sdir, bug_templates)
+    state.bug_reports_path = str(bugs_json)
     save_session(state)
     return state

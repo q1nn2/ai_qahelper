@@ -109,6 +109,10 @@ def _sync_context(context: ChatContext) -> None:
     st.session_state.last_session_id = context.session_id or ""
     st.session_state.last_target_url = context.target_url or ""
     st.session_state.last_requirements = context.requirements
+    st.session_state.last_figma_file_key = context.figma_file_key or ""
+    st.session_state.max_cases = context.max_cases or st.session_state.max_cases
+    st.session_state.test_cases_sheet_url = context.test_cases_sheet_url or ""
+    st.session_state.bug_reports_sheet_url = context.bug_reports_sheet_url or ""
 
 
 def _render_plan(plan: ChatPlan) -> None:
@@ -198,8 +202,7 @@ def main() -> None:
     if response.needs_confirmation and response.plan:
         st.session_state.pending_plan = response.plan.model_dump(mode="json")
         st.session_state.pending_message = prompt
-    else:
-        _sync_context(context)
+    _sync_context(context)
     _remember("assistant", response.message)
 
 

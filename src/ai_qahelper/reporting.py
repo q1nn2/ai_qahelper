@@ -75,10 +75,11 @@ def export_test_cases_local(
     base_dir: Path,
     test_cases: list[TestCase],
     columns: list[TestCaseExportColumn] | None = None,
+    filename_prefix: str = "test-cases",
 ) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = base_dir / "test-cases.csv"
-    xlsx_path = base_dir / "test-cases.xlsx"
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
     cols = columns if columns else default_test_case_export_columns()
     headers = [c.header for c in cols]
     rows_xlsx = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
@@ -88,10 +89,14 @@ def export_test_cases_local(
     return csv_path, xlsx_path
 
 
-def export_checklist_local(base_dir: Path, checklist_items: list[ChecklistItem]) -> tuple[Path, Path]:
+def export_checklist_local(
+    base_dir: Path,
+    checklist_items: list[ChecklistItem],
+    filename_prefix: str = "checklist",
+) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = base_dir / "checklist.csv"
-    xlsx_path = base_dir / "checklist.xlsx"
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
     rows = [
         {
             "item_id": item.item_id,
@@ -122,10 +127,14 @@ _BUG_EXPORT_KEYS = [
 ]
 
 
-def export_bug_reports_local(base_dir: Path, bug_reports: list[BugReport]) -> tuple[Path, Path]:
+def export_bug_reports_local(
+    base_dir: Path,
+    bug_reports: list[BugReport],
+    filename_prefix: str = "bug-reports",
+) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = base_dir / "bug-reports.csv"
-    xlsx_path = base_dir / "bug-reports.xlsx"
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
     rows = [
         {
             "bug_id": b.bug_id,

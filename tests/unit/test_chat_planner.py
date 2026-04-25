@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-from ai_qahelper.chat_agent import ChatContext, handle_message
-from ai_qahelper.chat_planner import plan_message
+from pathlib import Path
+from types import SimpleNamespace
+
+from ai_qahelper.chat_agent import ChatContext, handle_message, update_context_from_message
+from ai_qahelper.chat_executor import PlanExecutor
+from ai_qahelper.chat_planner import ChatPlan, PlanAction, plan_message
+from ai_qahelper.models import BugReport, ChecklistItem
+from ai_qahelper.models import TestCase as QaTestCase
+from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local
 
 
 def _action_types(result) -> list[str]:
@@ -21,7 +28,7 @@ def test_complex_risk_smoke_negative_bugs_plan() -> None:
     assert "agent_run" in action_types or "generate_docs" in action_types
     assert any(action.type == "generate_docs" and action.focus == "smoke" for action in result.plan.actions)
     assert any(action.type == "generate_docs" and action.focus == "negative" for action in result.plan.actions)
-    assert "draft_bugs" in action_types
+    assert "generate_bug_templates" in action_types
 
 
 def test_run_autotests_requires_confirmation() -> None:
@@ -75,3 +82,154 @@ def test_chat_agent_returns_confirmation_for_dangerous_plan() -> None:
     assert response.needs_confirmation is True
     assert response.plan is not None
     assert any(action.type == "run_autotests" for action in response.plan.actions)
+
+
+def test_message_links_update_context_before_planning() -> None:
+    context = ChatContext()
+
+    update_context_from_message(
+        context,
+        "Вот требования https://docs.example.com/spec.md вот сайт https://app.example.com сделай smoke и negative до 7 кейсов",
+    )
+
+    assert context.requirement_urls == ["https://docs.example.com/spec.md"]
+    assert context.target_url == "https://app.example.com"
+    assert context.max_cases == 7
+
+
+def test_missing_requirements_and_session_asks_clarification() -> None:
+    context = ChatContext(target_url="https://app.example.com")
+
+    response = handle_message(context, "сделай тест-кейсы", allow_llm=False)
+
+    assert response.plan is not None
+    assert response.plan.needs_clarification is True
+    assert "Загрузи требования" in response.message
+
+
+def test_prepare_bugs_without_auto_results_generates_bug_templates(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeState:
+        auto_results_path = None
+
+        def model_dump(self, mode: str = "json") -> dict:
+            return {"session_id": "s1", "bug_reports_path": "runs/s1/bug-reports.json"}
+
+    monkeypatch.setattr("ai_qahelper.chat_executor.load_session", lambda session_id: FakeState())
+
+    def _fake_generate_bug_templates(session_id: str):
+        calls.append(session_id)
+        return FakeState()
+
+    monkeypatch.setattr("ai_qahelper.chat_executor.generate_bug_templates_for_session", _fake_generate_bug_templates)
+
+    response = handle_message(ChatContext(session_id="s1"), "подготовь баги", allow_llm=False)
+
+    assert response.results[0]["bug_reports_path"] == "runs/s1/bug-reports.json"
+    assert calls == ["s1"]
+
+
+def test_focus_exports_create_distinct_filenames(tmp_path: Path) -> None:
+    test_cases = [
+        QaTestCase(
+            case_id="TC-001",
+            title="Smoke",
+            preconditions="Open app",
+            steps=["Open page"],
+            expected_result="Page is open",
+        )
+    ]
+    checklist = [
+        ChecklistItem(
+            item_id="CL-001",
+            check="Open app",
+            expected_result="App opens",
+        )
+    ]
+    bugs = [
+        BugReport(
+            bug_id="BUG-001",
+            title="Bug",
+            preconditions="Open app",
+            steps=["Open page"],
+            actual_result="Error",
+            expected_result="No error",
+        )
+    ]
+
+    smoke_csv, smoke_xlsx = export_test_cases_local(tmp_path, test_cases, filename_prefix="test-cases-smoke")
+    negative_csv, negative_xlsx = export_test_cases_local(tmp_path, test_cases, filename_prefix="test-cases-negative")
+    checklist_csv, checklist_xlsx = export_checklist_local(tmp_path, checklist, filename_prefix="checklist-smoke")
+    bugs_csv, bugs_xlsx = export_bug_reports_local(tmp_path, bugs, filename_prefix="bug-reports-negative")
+
+    for path in [smoke_csv, smoke_xlsx, negative_csv, negative_xlsx, checklist_csv, checklist_xlsx, bugs_csv, bugs_xlsx]:
+        assert path.is_file()
+    assert smoke_csv.name == "test-cases-smoke.csv"
+    assert negative_xlsx.name == "test-cases-negative.xlsx"
+
+
+def test_llm_planner_success_uses_mock_client(monkeypatch) -> None:
+    class FakeLlmClient:
+        def __init__(self, cfg) -> None:
+            self.cfg = cfg
+
+        def complete_json(self, system_prompt, user_prompt, schema):
+            return ChatPlan(
+                goal="Smoke",
+                actions=[
+                    PlanAction(
+                        type="generate_docs",
+                        artifact_type="testcases",
+                        focus="smoke",
+                        reason="LLM planned smoke checks",
+                    )
+                ],
+            )
+
+    monkeypatch.setattr("ai_qahelper.chat_planner.load_config", lambda: SimpleNamespace(llm=SimpleNamespace()))
+    monkeypatch.setattr("ai_qahelper.chat_planner.LlmClient", FakeLlmClient)
+
+    result = plan_message("сделай smoke", ChatContext(session_id="s1"))
+
+    assert result.used_fallback is False
+    assert result.plan.actions[0].type == "generate_docs"
+    assert result.plan.actions[0].focus == "smoke"
+
+
+def test_executor_runs_agent_then_smoke_then_negative(monkeypatch) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    class FakeState:
+        def __init__(self, session_id: str, test_cases_path: str) -> None:
+            self.session_id = session_id
+            self.test_cases_path = test_cases_path
+
+        def model_dump(self, mode: str = "json") -> dict:
+            return {"session_id": self.session_id, "test_cases_path": self.test_cases_path}
+
+    def _fake_agent_run(*args, **kwargs):
+        calls.append(("agent_run", kwargs.get("artifact_type")))
+        return {"session_id": "s1", "test_cases_path": "runs/s1/test-cases.json"}
+
+    def _fake_generate_docs(session_id: str, **kwargs):
+        calls.append(("generate_docs", kwargs.get("focus")))
+        return FakeState(session_id, f"runs/{session_id}/test-cases-{kwargs.get('focus')}.json")
+
+    monkeypatch.setattr("ai_qahelper.chat_executor.agent_run", _fake_agent_run)
+    monkeypatch.setattr("ai_qahelper.chat_executor.generate_docs", _fake_generate_docs)
+
+    plan = ChatPlan(
+        actions=[
+            PlanAction(type="agent_run", artifact_type="testcases", focus="general"),
+            PlanAction(type="generate_docs", artifact_type="testcases", focus="smoke"),
+            PlanAction(type="generate_docs", artifact_type="testcases", focus="negative"),
+        ]
+    )
+    context = ChatContext(requirements=["req.md"], target_url="https://app.example.com")
+
+    results = PlanExecutor().execute(context, plan)
+
+    assert context.session_id == "s1"
+    assert calls == [("agent_run", "testcases"), ("generate_docs", "smoke"), ("generate_docs", "negative")]
+    assert results[-1]["test_cases_path"] == "runs/s1/test-cases-negative.json"

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 from typing import Any
 
 from ai_qahelper.chat_planner import ChatPlan, PlanAction
@@ -9,11 +7,13 @@ from ai_qahelper.orchestrator import (
     agent_run,
     create_bug_drafts_from_failures,
     generate_autotests,
+    generate_bug_templates_for_session,
     generate_docs,
     run_autotests,
     run_manual,
     sync_reports,
 )
+from ai_qahelper.session_service import load_session
 
 
 class PlanExecutor:
@@ -66,8 +66,10 @@ def _handle_agent_run(context: Any, action: PlanAction, user_message: str) -> di
     context.output = artifact_type
     requirements = context.requirements
     requirement_urls = context.requirement_urls
-    if not requirements and not requirement_urls and user_message.strip():
-        requirements = [_write_inline_requirement(user_message)]
+    if not requirements and not requirement_urls:
+        raise ValueError("Загрузи требования или вставь текст требований.")
+    if not context.target_url:
+        raise ValueError("Укажи target URL для новой сессии.")
     data = agent_run(
         requirements,
         requirement_urls,
@@ -130,7 +132,20 @@ def _handle_run_autotests(context: Any, action: PlanAction, user_message: str) -
 
 def _handle_draft_bugs(context: Any, action: PlanAction, user_message: str) -> dict:
     _require_session(context)
-    state = create_bug_drafts_from_failures(context.session_id)
+    current_state = load_session(context.session_id)
+    if current_state.auto_results_path:
+        state = create_bug_drafts_from_failures(context.session_id)
+    else:
+        state = generate_bug_templates_for_session(context.session_id)
+    data = state.model_dump(mode="json")
+    data["action"] = action.type
+    data["title"] = _action_title(action)
+    return data
+
+
+def _handle_generate_bug_templates(context: Any, action: PlanAction, user_message: str) -> dict:
+    _require_session(context)
+    state = generate_bug_templates_for_session(context.session_id)
     data = state.model_dump(mode="json")
     data["action"] = action.type
     data["title"] = _action_title(action)
@@ -154,6 +169,7 @@ _ACTION_HANDLERS = {
     "generate_autotests": _handle_generate_autotests,
     "run_autotests": _handle_run_autotests,
     "draft_bugs": _handle_draft_bugs,
+    "generate_bug_templates": _handle_generate_bug_templates,
     "sync_reports": _handle_sync_reports,
     "help": _handle_help,
 }
@@ -162,14 +178,6 @@ _ACTION_HANDLERS = {
 def _require_session(context: Any) -> None:
     if not context.session_id:
         raise ValueError("Сначала создайте сессию: загрузите требования и попросите сделать анализ или тест-кейсы.")
-
-
-def _write_inline_requirement(text: str) -> str:
-    temp_dir = Path(tempfile.gettempdir()) / "ai_qahelper_chat_requirements"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    path = temp_dir / "chat-requirement.md"
-    path.write_text(text, encoding="utf-8")
-    return str(path)
 
 
 def _action_title(action: PlanAction) -> str:
@@ -181,6 +189,7 @@ def _action_title(action: PlanAction) -> str:
         return action.artifact_type
     titles = {
         "draft_bugs": "Баг-репорты",
+        "generate_bug_templates": "Черновики баг-репортов",
         "generate_autotests": "Автотесты подготовлены",
         "run_autotests": "Автотесты запущены",
         "sync_reports": "Google Sheets",

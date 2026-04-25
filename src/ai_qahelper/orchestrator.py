@@ -12,7 +12,7 @@ from ai_qahelper.autotest_service import (
     run_autotests,
     run_manual,
 )
-from ai_qahelper.docs_service import generate_docs
+from ai_qahelper.docs_service import generate_bug_templates_for_session, generate_docs
 from ai_qahelper.reporting import save_json
 from ai_qahelper.session_service import ingest
 from ai_qahelper.sync_service import sync_reports
@@ -23,6 +23,7 @@ __all__ = [
     "agent_run",
     "create_bug_drafts_from_failures",
     "generate_autotests",
+    "generate_bug_templates_for_session",
     "generate_docs",
     "ingest",
     "run_autotests",
