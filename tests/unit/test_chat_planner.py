@@ -140,6 +140,19 @@ def test_site_discovery_without_target_url_asks_clarification() -> None:
     assert "target URL" in result.plan.clarification_question
 
 
+def test_site_discovery_smoke_plan() -> None:
+    context = ChatContext(target_url="https://example.com")
+
+    result = plan_message(
+        "Требований нет, пройди по сайту https://example.com и сделай smoke тесты",
+        context,
+        allow_llm=False,
+    )
+
+    assert [action.type for action in result.plan.actions[:2]] == ["discover_site", "generate_docs"]
+    assert result.plan.actions[1].focus == "smoke"
+
+
 def test_prepare_bugs_without_auto_results_generates_bug_templates(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -274,10 +287,11 @@ def test_executor_discover_site_updates_session_id(monkeypatch) -> None:
             return {
                 "session_id": "site-s1",
                 "site_model_path": "runs/site-s1/site-model.json",
+                "exploratory_report_path": "runs/site-s1/exploratory-report.json",
                 "unified_model_path": "runs/site-s1/unified-model.json",
             }
 
-    monkeypatch.setattr("ai_qahelper.chat_executor.discover_site", lambda target_url: FakeState())
+    monkeypatch.setattr("ai_qahelper.chat_executor.discover_site", lambda target_url, **kwargs: FakeState())
 
     plan = ChatPlan(actions=[PlanAction(type="discover_site")])
     context = ChatContext(target_url="https://example.com")
@@ -286,6 +300,7 @@ def test_executor_discover_site_updates_session_id(monkeypatch) -> None:
 
     assert context.session_id == "site-s1"
     assert results[0]["site_model_path"] == "runs/site-s1/site-model.json"
+    assert results[0]["exploratory_report_path"] == "runs/site-s1/exploratory-report.json"
 
 
 def test_executor_can_generate_docs_after_discover_site(monkeypatch) -> None:
@@ -296,6 +311,7 @@ def test_executor_can_generate_docs_after_discover_site(monkeypatch) -> None:
             return {
                 "session_id": "site-s1",
                 "site_model_path": "runs/site-s1/site-model.json",
+                "exploratory_report_path": "runs/site-s1/exploratory-report.json",
                 "unified_model_path": "runs/site-s1/unified-model.json",
             }
 
@@ -306,7 +322,7 @@ def test_executor_can_generate_docs_after_discover_site(monkeypatch) -> None:
                 "test_cases_path": "runs/site-s1/test-cases-ui.json",
             }
 
-    def _fake_discover_site(target_url: str):
+    def _fake_discover_site(target_url: str, **kwargs):
         calls.append(("discover_site", target_url))
         return FakeDiscoveryState()
 

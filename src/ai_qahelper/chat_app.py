@@ -18,6 +18,12 @@ def _init_state() -> None:
     st.session_state.setdefault("last_figma_file_key", "")
     st.session_state.setdefault("test_cases_sheet_url", "")
     st.session_state.setdefault("bug_reports_sheet_url", "")
+    st.session_state.setdefault("site_discovery_max_pages", 5)
+    st.session_state.setdefault("site_discovery_max_depth", 1)
+    st.session_state.setdefault("site_discovery_same_domain_only", True)
+    st.session_state.setdefault("site_discovery_timeout_seconds", 20)
+    st.session_state.setdefault("site_discovery_use_playwright", True)
+    st.session_state.setdefault("site_discovery_create_screenshots", True)
     st.session_state.setdefault("pending_plan", None)
     st.session_state.setdefault("pending_message", "")
 
@@ -62,6 +68,44 @@ def _render_sidebar() -> list[str]:
     st.session_state.max_cases = int(max_cases)
     st.session_state.with_bug_drafts = st.sidebar.checkbox("with_bug_drafts", value=False)
     st.session_state.skip_test_analysis = st.sidebar.checkbox("skip_test_analysis", value=False)
+    st.sidebar.header("Site Discovery")
+    st.session_state.site_discovery_max_pages = int(
+        st.sidebar.number_input(
+            "max_pages",
+            min_value=1,
+            max_value=20,
+            value=int(st.session_state.site_discovery_max_pages),
+            help="Безопасный лимит страниц для exploratory discovery.",
+        )
+    )
+    st.session_state.site_discovery_max_depth = int(
+        st.sidebar.number_input(
+            "max_depth",
+            min_value=0,
+            max_value=3,
+            value=int(st.session_state.site_discovery_max_depth),
+        )
+    )
+    st.session_state.site_discovery_same_domain_only = st.sidebar.checkbox(
+        "same_domain_only",
+        value=st.session_state.site_discovery_same_domain_only,
+    )
+    st.session_state.site_discovery_timeout_seconds = int(
+        st.sidebar.number_input(
+            "timeout_seconds",
+            min_value=1,
+            max_value=60,
+            value=int(st.session_state.site_discovery_timeout_seconds),
+        )
+    )
+    st.session_state.site_discovery_use_playwright = st.sidebar.checkbox(
+        "use_playwright",
+        value=st.session_state.site_discovery_use_playwright,
+    )
+    st.session_state.site_discovery_create_screenshots = st.sidebar.checkbox(
+        "создавать screenshots",
+        value=st.session_state.site_discovery_create_screenshots,
+    )
     st.session_state.test_cases_sheet_url = st.sidebar.text_input(
         "Google Sheets URL для тест-кейсов",
         value=st.session_state.test_cases_sheet_url,
@@ -102,6 +146,12 @@ def _build_context(requirements: list[str]) -> ChatContext:
         skip_test_analysis=st.session_state.skip_test_analysis,
         test_cases_sheet_url=st.session_state.test_cases_sheet_url or None,
         bug_reports_sheet_url=st.session_state.bug_reports_sheet_url or None,
+        site_discovery_max_pages=st.session_state.site_discovery_max_pages,
+        site_discovery_max_depth=st.session_state.site_discovery_max_depth,
+        site_discovery_same_domain_only=st.session_state.site_discovery_same_domain_only,
+        site_discovery_timeout_seconds=st.session_state.site_discovery_timeout_seconds,
+        site_discovery_use_playwright=st.session_state.site_discovery_use_playwright,
+        site_discovery_create_screenshots=st.session_state.site_discovery_create_screenshots,
     )
 
 
@@ -113,6 +163,12 @@ def _sync_context(context: ChatContext) -> None:
     st.session_state.max_cases = context.max_cases or st.session_state.max_cases
     st.session_state.test_cases_sheet_url = context.test_cases_sheet_url or ""
     st.session_state.bug_reports_sheet_url = context.bug_reports_sheet_url or ""
+    st.session_state.site_discovery_max_pages = context.site_discovery_max_pages
+    st.session_state.site_discovery_max_depth = context.site_discovery_max_depth
+    st.session_state.site_discovery_same_domain_only = context.site_discovery_same_domain_only
+    st.session_state.site_discovery_timeout_seconds = context.site_discovery_timeout_seconds
+    st.session_state.site_discovery_use_playwright = context.site_discovery_use_playwright
+    st.session_state.site_discovery_create_screenshots = context.site_discovery_create_screenshots
 
 
 def _render_plan(plan: ChatPlan) -> None:

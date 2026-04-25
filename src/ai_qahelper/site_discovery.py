@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import httpx
 
@@ -24,9 +25,47 @@ DISCOVERY_NOTES = [
     "Требования не были предоставлены",
     "Тест-кейсы основаны на фактически найденных элементах UI",
 ]
+SUGGESTED_TEST_AREAS = [
+    "smoke",
+    "navigation",
+    "forms validation",
+    "UI consistency",
+    "accessibility basics",
+    "error handling",
+]
+LIMITATIONS = [
+    "No product requirements were provided",
+    "Business rules were not verified",
+    "Only visible UI was analyzed",
+]
+SKIPPED_EXTENSIONS = (
+    ".pdf",
+    ".zip",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".css",
+    ".js",
+    ".woff",
+    ".woff2",
+)
 
 
-def discover_site(target_url: str, session_label: str | None = None) -> SessionState:
+def discover_site(
+    target_url: str,
+    session_label: str | None = None,
+    *,
+    max_pages: int = 5,
+    same_domain_only: bool = True,
+    max_depth: int = 1,
+    timeout_seconds: int = 20,
+    use_playwright: bool = True,
+    create_screenshots: bool = True,
+) -> SessionState:
     """Create a session from observed site structure instead of product requirements."""
 
     _validate_target_url(target_url)
@@ -40,15 +79,28 @@ def discover_site(target_url: str, session_label: str | None = None) -> SessionS
     sdir = session_path(session_id)
     configure_logging(sdir)
 
-    site_model = collect_site_model(target_url, sdir)
+    site_model = collect_site_model(
+        target_url,
+        sdir,
+        max_pages=max_pages,
+        same_domain_only=same_domain_only,
+        max_depth=max_depth,
+        timeout_seconds=timeout_seconds,
+        use_playwright=use_playwright,
+        create_screenshots=create_screenshots,
+    )
     site_model_path = sdir / "site-model.json"
     save_json(site_model_path, site_model)
+
+    exploratory_report = build_exploratory_report(site_model)
+    exploratory_report_path = sdir / "exploratory-report.json"
+    save_json(exploratory_report_path, exploratory_report)
 
     unified = UnifiedRequirementModel(
         requirements=[
             RequirementItem(
                 source=f"site-discovery:{target_url}",
-                content=_site_model_to_synthetic_requirement(site_model),
+                content=_site_model_to_synthetic_requirement(site_model, exploratory_report),
             )
         ],
         target_url=target_url,
@@ -62,21 +114,78 @@ def discover_site(target_url: str, session_label: str | None = None) -> SessionS
         target_url=target_url,
         requirements_files=[],
         site_model_path=str(site_model_path),
+        exploratory_report_path=str(exploratory_report_path),
         unified_model_path=str(unified_model_path),
     )
     save_session(state)
     return state
 
 
-def collect_site_model(target_url: str, session_dir: Path | None = None) -> dict:
-    page = _collect_with_playwright(target_url, session_dir)
-    if page is None:
-        page = _collect_with_httpx(target_url)
+def collect_site_model(
+    target_url: str,
+    session_dir: Path | None = None,
+    *,
+    max_pages: int = 5,
+    same_domain_only: bool = True,
+    max_depth: int = 1,
+    timeout_seconds: int = 20,
+    use_playwright: bool = True,
+    create_screenshots: bool = True,
+) -> dict:
+    max_pages = max(1, min(max_pages, 20))
+    max_depth = max(0, min(max_depth, 3))
+    timeout_seconds = max(1, min(timeout_seconds, 60))
+    root_url = _normalize_url(target_url)
+    root_netloc = urlparse(root_url).netloc
+    queue: deque[tuple[str, int]] = deque([(root_url, 0)])
+    visited: set[str] = set()
+    pages: list[dict] = []
+
+    while queue and len(pages) < max_pages:
+        current_url, depth = queue.popleft()
+        if current_url in visited:
+            continue
+        visited.add(current_url)
+        page = _collect_page(
+            current_url,
+            session_dir,
+            timeout_seconds=timeout_seconds,
+            use_playwright=use_playwright,
+            create_screenshots=create_screenshots,
+            page_index=len(pages) + 1,
+        )
+        pages.append(page)
+        if depth >= max_depth:
+            continue
+        for link in page.get("links", []):
+            href = link.get("href", "")
+            next_url = _normalize_url(href)
+            if not _should_visit_url(next_url, root_netloc=root_netloc, same_domain_only=same_domain_only):
+                continue
+            if next_url not in visited:
+                queue.append((next_url, depth + 1))
+
     return {
         "target_url": target_url,
-        "title": page.get("title", ""),
-        "pages": [page],
+        "title": pages[0].get("title", "") if pages else "",
+        "pages": pages,
+        "summary": _build_summary(pages),
         "discovery_notes": DISCOVERY_NOTES,
+    }
+
+
+def build_exploratory_report(site_model: dict) -> dict:
+    pages = site_model.get("pages", [])
+    return {
+        "target_url": site_model.get("target_url", ""),
+        "scope": "Site discovery without product requirements",
+        "pages_scanned": [page.get("url", "") for page in pages],
+        "observed_features": _observed_features(pages),
+        "forms_inventory": _forms_inventory(pages),
+        "navigation_inventory": _navigation_inventory(pages),
+        "risks_and_gaps": _risks_and_gaps(site_model),
+        "suggested_test_areas": SUGGESTED_TEST_AREAS,
+        "limitations": LIMITATIONS,
     }
 
 
@@ -88,7 +197,37 @@ def _validate_target_url(target_url: str) -> None:
         raise RuntimeError(f"Target URL '{target_url}' is not in allowed environments: {allowed}")
 
 
-def _collect_with_playwright(target_url: str, session_dir: Path | None) -> dict | None:
+def _collect_page(
+    target_url: str,
+    session_dir: Path | None,
+    *,
+    timeout_seconds: int,
+    use_playwright: bool,
+    create_screenshots: bool,
+    page_index: int,
+) -> dict:
+    page = None
+    if use_playwright:
+        page = _collect_with_playwright(
+            target_url,
+            session_dir,
+            timeout_seconds=timeout_seconds,
+            create_screenshots=create_screenshots,
+            page_index=page_index,
+        )
+    if page is None:
+        page = _collect_with_httpx(target_url, timeout_seconds=timeout_seconds)
+    return page
+
+
+def _collect_with_playwright(
+    target_url: str,
+    session_dir: Path | None,
+    *,
+    timeout_seconds: int,
+    create_screenshots: bool,
+    page_index: int,
+) -> dict | None:
     try:
         from playwright.sync_api import sync_playwright
     except Exception:  # noqa: BLE001 - Playwright is optional
@@ -97,15 +236,16 @@ def _collect_with_playwright(target_url: str, session_dir: Path | None) -> dict 
     console_errors: list[str] = []
     network_errors: list[str] = []
     screenshot_path = ""
+    browser = None
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
             page.on("requestfailed", lambda req: network_errors.append(req.url))
-            response = page.goto(target_url, wait_until="networkidle", timeout=30_000)
-            if session_dir is not None:
-                screenshot = session_dir / "site-discovery.png"
+            response = page.goto(target_url, wait_until="networkidle", timeout=timeout_seconds * 1000)
+            if create_screenshots and session_dir is not None:
+                screenshot = session_dir / f"site-discovery-page-{page_index}.png"
                 page.screenshot(path=str(screenshot), full_page=True)
                 screenshot_path = str(screenshot)
             html = page.content()
@@ -113,6 +253,8 @@ def _collect_with_playwright(target_url: str, session_dir: Path | None) -> dict 
             title = page.title()
             browser.close()
     except Exception:  # noqa: BLE001 - browser collection should gracefully fall back
+        if browser is not None:
+            browser.close()
         return None
 
     parsed = _parse_html(target_url, html, status_code=response.status if response else None)
@@ -124,10 +266,13 @@ def _collect_with_playwright(target_url: str, session_dir: Path | None) -> dict 
     return parsed
 
 
-def _collect_with_httpx(target_url: str) -> dict:
-    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-        response = client.get(target_url)
-    return _parse_html(target_url, response.text, status_code=response.status_code)
+def _collect_with_httpx(target_url: str, *, timeout_seconds: int) -> dict:
+    try:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
+            response = client.get(target_url)
+        return _parse_html(str(response.url), response.text, status_code=response.status_code)
+    except Exception as exc:  # noqa: BLE001 - discovery should still produce a model
+        return _empty_page(target_url, network_errors=[f"{type(exc).__name__}: {exc}"])
 
 
 def _parse_html(page_url: str, html: str, status_code: int | None = None) -> dict:
@@ -141,6 +286,8 @@ def _parse_html(page_url: str, html: str, status_code: int | None = None) -> dic
     if meta and meta.get("content"):
         meta_description = str(meta["content"]).strip()
 
+    images_alt = [str(img.get("alt", "")).strip() for img in soup.find_all("img") if str(img.get("alt", "")).strip()]
+    images_missing_alt = sum(1 for img in soup.find_all("img") if not str(img.get("alt", "")).strip())
     return {
         "url": page_url,
         "page_url": page_url,
@@ -152,7 +299,8 @@ def _parse_html(page_url: str, html: str, status_code: int | None = None) -> dic
         "forms": _forms(soup),
         "inputs": _inputs(soup),
         "buttons": _buttons(soup),
-        "images_alt": [str(img.get("alt", "")).strip() for img in soup.find_all("img") if str(img.get("alt", "")).strip()],
+        "images_alt": images_alt,
+        "images_missing_alt": images_missing_alt,
         "visible_text_sample": _sample_text(soup.get_text(" ", strip=True)),
         "console_errors": [],
         "network_errors": [],
@@ -170,7 +318,7 @@ def _links(soup: Any, page_url: str) -> list[dict]:
         href = str(anchor.get("href", "")).strip()
         text = anchor.get_text(" ", strip=True)
         if href or text:
-            links.append({"text": text, "href": urljoin(page_url, href) if href else ""})
+            links.append({"text": text, "href": _normalize_url(urljoin(page_url, href)) if href else ""})
     return links[:100]
 
 
@@ -185,7 +333,7 @@ def _forms(soup: Any) -> list[dict]:
                 "buttons": _buttons(form),
             }
         )
-    return forms
+    return forms[:100]
 
 
 def _inputs(soup: Any) -> list[dict]:
@@ -213,7 +361,7 @@ def _buttons(soup: Any) -> list[str]:
     return [*labels, *submit_inputs][:100]
 
 
-def _label_for_input(soup: BeautifulSoup, node) -> str:
+def _label_for_input(soup: Any, node: Any) -> str:
     input_id = node.get("id")
     if input_id:
         label = soup.find("label", attrs={"for": input_id})
@@ -235,8 +383,8 @@ class _SimpleHtmlCollector(HTMLParser):
         self.inputs: list[dict] = []
         self.buttons: list[str] = []
         self.images_alt: list[str] = []
+        self.images_missing_alt = 0
         self.text_parts: list[str] = []
-        self._current_tag = ""
         self._current_link: dict | None = None
         self._current_button: list[str] | None = None
         self._current_heading: list[str] | None = None
@@ -244,17 +392,23 @@ class _SimpleHtmlCollector(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attrs_dict = {key.lower(): value or "" for key, value in attrs}
-        self._current_tag = tag
         if tag == "title":
             self._current_title = []
         elif tag in {"h1", "h2", "h3"}:
             self._current_heading = []
         elif tag == "a":
-            self._current_link = {"text": "", "href": urljoin(self.page_url, attrs_dict.get("href", ""))}
+            self._current_link = {"text": "", "href": _normalize_url(urljoin(self.page_url, attrs_dict.get("href", "")))}
         elif tag == "button":
             self._current_button = []
         elif tag == "form":
-            self.forms.append({"action": attrs_dict.get("action", ""), "method": attrs_dict.get("method", "get").lower(), "inputs": [], "buttons": []})
+            self.forms.append(
+                {
+                    "action": attrs_dict.get("action", ""),
+                    "method": attrs_dict.get("method", "get").lower(),
+                    "inputs": [],
+                    "buttons": [],
+                }
+            )
         elif tag in {"input", "textarea", "select"}:
             item = {
                 "tag": tag,
@@ -266,10 +420,18 @@ class _SimpleHtmlCollector(HTMLParser):
             self.inputs.append(item)
             if self.forms:
                 self.forms[-1]["inputs"].append(item)
-            if tag == "input" and attrs_dict.get("type", "").lower() in {"button", "submit", "reset"} and attrs_dict.get("value", ""):
+            if (
+                tag == "input"
+                and attrs_dict.get("type", "").lower() in {"button", "submit", "reset"}
+                and attrs_dict.get("value", "")
+            ):
                 self.buttons.append(attrs_dict["value"])
-        elif tag == "img" and attrs_dict.get("alt", ""):
-            self.images_alt.append(attrs_dict["alt"])
+        elif tag == "img":
+            alt = attrs_dict.get("alt", "").strip()
+            if alt:
+                self.images_alt.append(alt)
+            else:
+                self.images_missing_alt += 1
         elif tag == "meta" and attrs_dict.get("name", "").lower() == "description":
             self.meta_description = attrs_dict.get("content", "").strip()
 
@@ -323,6 +485,7 @@ def _parse_html_fallback(page_url: str, html: str, status_code: int | None = Non
         "inputs": parser.inputs[:100],
         "buttons": parser.buttons[:100],
         "images_alt": parser.images_alt[:100],
+        "images_missing_alt": parser.images_missing_alt,
         "visible_text_sample": _sample_text(" ".join(parser.text_parts)),
         "console_errors": [],
         "network_errors": [],
@@ -330,33 +493,180 @@ def _parse_html_fallback(page_url: str, html: str, status_code: int | None = Non
     }
 
 
+def _empty_page(url: str, *, network_errors: list[str] | None = None) -> dict:
+    return {
+        "url": url,
+        "page_url": url,
+        "title": "",
+        "status_code": None,
+        "meta_description": "",
+        "headings": [],
+        "links": [],
+        "forms": [],
+        "inputs": [],
+        "buttons": [],
+        "images_alt": [],
+        "images_missing_alt": 0,
+        "visible_text_sample": "",
+        "console_errors": [],
+        "network_errors": network_errors or [],
+        "screenshot_path": "",
+    }
+
+
+def _normalize_url(url: str) -> str:
+    clean, _fragment = urldefrag((url or "").strip())
+    parsed = urlparse(clean)
+    if parsed.scheme and parsed.netloc:
+        return parsed._replace(path=parsed.path or "/").geturl().rstrip("/") or clean
+    return clean
+
+
+def _should_visit_url(url: str, *, root_netloc: str, same_domain_only: bool) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if same_domain_only and parsed.netloc != root_netloc:
+        return False
+    path = parsed.path.lower()
+    return not path.endswith(SKIPPED_EXTENSIONS)
+
+
+def _build_summary(pages: list[dict]) -> dict:
+    return {
+        "pages_scanned": len(pages),
+        "forms_found": sum(len(page.get("forms", [])) for page in pages),
+        "inputs_found": sum(len(page.get("inputs", [])) for page in pages),
+        "buttons_found": sum(len(page.get("buttons", [])) for page in pages),
+        "links_found": sum(len(page.get("links", [])) for page in pages),
+        "console_errors_found": sum(len(page.get("console_errors", [])) for page in pages),
+        "network_errors_found": sum(len(page.get("network_errors", [])) for page in pages),
+    }
+
+
+def _observed_features(pages: list[dict]) -> list[str]:
+    features: list[str] = []
+    for page in pages:
+        prefix = page.get("title") or page.get("url")
+        if page.get("headings"):
+            features.append(f"{prefix}: headings: {', '.join(page['headings'][:5])}")
+        if page.get("forms"):
+            features.append(f"{prefix}: {len(page['forms'])} form(s)")
+        if page.get("buttons"):
+            features.append(f"{prefix}: buttons: {', '.join(page['buttons'][:5])}")
+    return features
+
+
+def _forms_inventory(pages: list[dict]) -> list[dict]:
+    inventory: list[dict] = []
+    for page in pages:
+        for form in page.get("forms", []):
+            inventory.append(
+                {
+                    "page_url": page.get("url", ""),
+                    "method": form.get("method", ""),
+                    "action": form.get("action", ""),
+                    "inputs": form.get("inputs", []),
+                    "buttons": form.get("buttons", []),
+                }
+            )
+    return inventory
+
+
+def _navigation_inventory(pages: list[dict]) -> list[dict]:
+    return [
+        {
+            "page_url": page.get("url", ""),
+            "links": page.get("links", [])[:30],
+        }
+        for page in pages
+    ]
+
+
+def _risks_and_gaps(site_model: dict) -> list[str]:
+    risks: list[str] = []
+    for page in site_model.get("pages", []):
+        url = page.get("url", "")
+        if page.get("status_code") and page.get("status_code") != 200:
+            risks.append(f"{url}: non-200 status code {page.get('status_code')}")
+        if not page.get("meta_description"):
+            risks.append(f"{url}: missing meta description")
+        if page.get("console_errors"):
+            risks.append(f"{url}: console errors found")
+        if page.get("network_errors"):
+            risks.append(f"{url}: network failures found")
+        if page.get("images_missing_alt", 0):
+            risks.append(f"{url}: images without alt text: {page.get('images_missing_alt')}")
+        for input_item in page.get("inputs", []):
+            if not (input_item.get("label") or input_item.get("placeholder") or input_item.get("name")):
+                risks.append(f"{url}: input without label/name/placeholder")
+            elif not input_item.get("label"):
+                risks.append(f"{url}: form input without explicit label: {input_item.get('name') or input_item.get('placeholder')}")
+        if any(not button.strip() for button in page.get("buttons", [])):
+            risks.append(f"{url}: button without visible text")
+    return list(dict.fromkeys(risks))
+
+
 def _sample_text(text: str, limit: int = 4000) -> str:
     normalized = " ".join(text.split())
     return normalized[:limit]
 
 
-def _site_model_to_synthetic_requirement(site_model: dict) -> str:
-    page = (site_model.get("pages") or [{}])[0]
-    headings = ", ".join(page.get("headings", [])[:10]) or "не найдены"
-    buttons = ", ".join(page.get("buttons", [])[:10]) or "не найдены"
-    links = page.get("links", [])
-    link_texts = ", ".join((link.get("text") or link.get("href") or "") for link in links[:10]) or "не найдены"
-    forms = page.get("forms", [])
-    inputs = page.get("inputs", [])
+def _site_model_to_synthetic_requirement(site_model: dict, exploratory_report: dict) -> str:
+    pages = site_model.get("pages", [])
+    page_lines = [
+        f"- {page.get('url', '')} | title={page.get('title', '')} | status={page.get('status_code', '')}"
+        for page in pages
+    ]
+    form_lines = [
+        f"- {item.get('page_url', '')}: method={item.get('method', '')}, action={item.get('action', '')}, inputs={len(item.get('inputs', []))}"
+        for item in exploratory_report.get("forms_inventory", [])
+    ]
+    field_lines = [
+        f"- {page.get('url', '')}: "
+        + ", ".join(
+            (field.get("label") or field.get("placeholder") or field.get("name") or field.get("tag") or "unnamed")
+            for field in page.get("inputs", [])[:20]
+        )
+        for page in pages
+        if page.get("inputs")
+    ]
+    button_lines = [
+        f"- {page.get('url', '')}: {', '.join(page.get('buttons', [])[:20])}"
+        for page in pages
+        if page.get("buttons")
+    ]
+    link_lines = [
+        f"- {page.get('url', '')}: "
+        + ", ".join((link.get("text") or link.get("href") or "") for link in page.get("links", [])[:20])
+        for page in pages
+        if page.get("links")
+    ]
+    risks = exploratory_report.get("risks_and_gaps", [])
     return "\n".join(
         [
-            "Это не требования продукта. Это фактическое описание сайта, полученное автоматическим discovery.",
+            "Это не требования продукта. Это фактическое описание сайта, полученное автоматическим discovery. Не придумывай бизнес-требования.",
             f"Целевой URL: {site_model.get('target_url', '')}",
-            f"Заголовок страницы: {page.get('title', '')}",
-            f"HTTP status: {page.get('status_code', '')}",
-            f"Meta description: {page.get('meta_description', '')}",
-            f"Найденные заголовки h1/h2/h3: {headings}",
-            f"Найденные кнопки: {buttons}",
-            f"Найденные ссылки: {link_texts}",
-            f"Количество форм: {len(forms)}",
-            f"Количество полей ввода: {len(inputs)}",
-            f"Ошибки console: {len(page.get('console_errors', []))}",
-            f"Network failures: {len(page.get('network_errors', []))}",
-            "Генерируй только exploratory/smoke/UI тест-кейсы по наблюдаемому поведению сайта. Не придумывай бизнес-требования.",
+            f"Summary: {site_model.get('summary', {})}",
+            "",
+            "Страницы:",
+            *(page_lines or ["- не найдены"]),
+            "",
+            "Найденные формы:",
+            *(form_lines or ["- не найдены"]),
+            "",
+            "Найденные поля:",
+            *(field_lines or ["- не найдены"]),
+            "",
+            "Найденные кнопки:",
+            *(button_lines or ["- не найдены"]),
+            "",
+            "Основные ссылки:",
+            *(link_lines or ["- не найдены"]),
+            "",
+            "Потенциальные риски:",
+            *(risks or ["- существенные UI-риски не выявлены автоматическим discovery"]),
+            "",
+            "Генерируй только exploratory/smoke/UI тест-кейсы по наблюдаемому поведению сайта.",
         ]
     )

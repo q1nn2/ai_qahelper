@@ -35,6 +35,12 @@ class ChatContext:
     skip_test_analysis: bool = False
     test_cases_sheet_url: str | None = None
     bug_reports_sheet_url: str | None = None
+    site_discovery_max_pages: int = 5
+    site_discovery_max_depth: int = 1
+    site_discovery_same_domain_only: bool = True
+    site_discovery_timeout_seconds: int = 20
+    site_discovery_use_playwright: bool = True
+    site_discovery_create_screenshots: bool = True
 
 
 @dataclass

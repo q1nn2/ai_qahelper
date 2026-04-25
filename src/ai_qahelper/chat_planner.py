@@ -102,7 +102,7 @@ PLANNER_SYSTEM_PROMPT = """
 Не выполняй задачу сам. Используй только поддерживаемые action types:
 agent_run, discover_site, generate_docs, run_manual, generate_autotests, run_autotests, draft_bugs, generate_bug_templates, sync_reports, help.
 draft_bugs используй только для багов по падениям автотестов. generate_bug_templates используй для черновиков багов по требованиям, рискам или тест-кейсам.
-discover_site используй, когда requirements нет, но есть target_url и пользователь явно просит проанализировать/посмотреть/исследовать сайт или сделать тест-кейсы без требований. После discover_site обычно добавь generate_docs с artifact_type=testcases и focus=general, либо focus=ui если пользователь явно просит UI-проверки.
+discover_site используй, когда requirements нет, но есть target_url и пользователь явно просит проанализировать/посмотреть/исследовать/пройти по сайту, найти формы, проверить навигацию, сделать exploratory/smoke тесты по сайту или сделать тест-кейсы без требований. После discover_site обычно добавь generate_docs с artifact_type=testcases. Если пользователь просит smoke по сайту — focus=smoke; формы/валидацию — focus=negative или ui; навигацию/UI — focus=ui; иначе focus=general.
 Если requirements есть — используй обычный pipeline через agent_run/generate_docs, не discover_site.
 Для site discovery не придумывай бизнес-требования: тесты должны быть exploratory/smoke/UI по фактически видимому поведению сайта.
 
@@ -381,7 +381,7 @@ def fallback_plan_message(
             _action(
                 "generate_docs",
                 signals.artifact_type,
-                "ui" if "ui" in signals.focuses else "general",
+                _site_discovery_focus(text, signals.focuses),
                 effective_max_cases,
                 "Сгенерировать exploratory/smoke/UI тест-кейсы по фактическому поведению сайта",
             )
@@ -589,6 +589,15 @@ def _wants_site_discovery(text: str) -> bool:
         "проанализируй сайт",
         "посмотри сайт",
         "исследуй сайт",
+        "пройди по сайту",
+        "исследуй несколько страниц",
+        "найди формы",
+        "проверь навигацию",
+        "сделай exploratory тесты",
+        "exploratory",
+        "сделай smoke по сайту",
+        "смоук по сайту",
+        "сделай тесты по фактическому сайту",
         "составь тест-кейсы по сайту",
         "вот ссылка на сайт",
         "сделай тест-кейсы без требований",
@@ -597,6 +606,18 @@ def _wants_site_discovery(text: str) -> bool:
         "discover site",
         "without requirements",
     )
+
+
+def _site_discovery_focus(text: str, focuses: list[Focus]) -> Focus:
+    if "smoke" in focuses:
+        return "smoke"
+    if "negative" in focuses:
+        return "negative"
+    if _has_any(text, "форм", "валидац", "validation"):
+        return "negative"
+    if "ui" in focuses or _has_any(text, "навигац", "navigation", "ui", "интерфейс"):
+        return "ui"
+    return "general"
 
 
 def _extract_focus_sequence(text: str) -> list[Focus]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from ai_qahelper.chat_planner import ChatPlan, PlanAction
@@ -41,6 +43,7 @@ def collect_artifacts(results: list[dict]) -> list[str]:
         "consistency_report_path",
         "test_analysis_path",
         "site_model_path",
+        "exploratory_report_path",
         "checklist_path",
         "test_cases_path",
         "bug_reports_path",
@@ -90,8 +93,19 @@ def _handle_agent_run(context: Any, action: PlanAction, user_message: str) -> di
 def _handle_discover_site(context: Any, action: PlanAction, user_message: str) -> dict:
     if not context.target_url:
         raise ValueError("Укажи target URL для site discovery.")
-    state = discover_site(context.target_url)
+    state = discover_site(
+        context.target_url,
+        max_pages=getattr(context, "site_discovery_max_pages", 5),
+        same_domain_only=getattr(context, "site_discovery_same_domain_only", True),
+        max_depth=getattr(context, "site_discovery_max_depth", 1),
+        timeout_seconds=getattr(context, "site_discovery_timeout_seconds", 20),
+        use_playwright=getattr(context, "site_discovery_use_playwright", True),
+        create_screenshots=getattr(context, "site_discovery_create_screenshots", True),
+    )
     data = state.model_dump(mode="json")
+    site_model_path = data.get("site_model_path")
+    if site_model_path and Path(site_model_path).is_file():
+        data["summary"] = json.loads(Path(site_model_path).read_text(encoding="utf-8")).get("summary", {})
     data["action"] = action.type
     data["title"] = _action_title(action)
     return data
