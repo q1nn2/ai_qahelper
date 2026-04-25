@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -21,6 +24,14 @@ app = typer.Typer(help="Local AI QA helper")
 
 def run_cli() -> None:
     app()
+
+
+@app.command("chat")
+def chat_cmd() -> None:
+    """Open AI QAHelper Chat in a local browser window."""
+
+    chat_app_path = Path(__file__).with_name("chat_app.py")
+    subprocess.run([sys.executable, "-m", "streamlit", "run", str(chat_app_path)], check=False)
 
 
 @app.command("ingest")
