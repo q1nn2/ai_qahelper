@@ -11,6 +11,7 @@ from openai import APIError, OpenAI
 from pydantic import BaseModel, TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 
+from ai_qahelper.config import get_openai_api_key, is_placeholder_api_key
 from ai_qahelper.llm_errors import LlmEmptyResponse, LlmJsonParseError, LlmSchemaValidationError
 from ai_qahelper.models import LlmConfig
 
@@ -57,12 +58,19 @@ def _parse_json_payload(text: str) -> Any:
 
 class LlmClient:
     def __init__(self, config: LlmConfig) -> None:
-        api_key = (config.api_key or "").strip() or os.getenv(config.api_key_env)
+        configured_key = (config.api_key or "").strip()
+        if configured_key and not is_placeholder_api_key(configured_key):
+            api_key = configured_key
+        elif config.api_key_env == "OPENAI_API_KEY":
+            api_key = get_openai_api_key()
+        else:
+            env_key = os.getenv(config.api_key_env)
+            api_key = env_key.strip() if env_key and not is_placeholder_api_key(env_key) else None
         if not api_key:
             raise MissingApiKeyError(
                 f"Не найден {config.api_key_env}. "
-                f"Добавьте строку {config.api_key_env}=sk-... в файл .env "
-                "или задайте переменную окружения перед запуском."
+                "Вставьте ключ в блоке настройки AI в браузере, "
+                "сохраните его в локальный .env или задайте переменную окружения перед запуском."
             )
         timeout = float(config.request_timeout_seconds)
         self._client = OpenAI(base_url=config.base_url, api_key=api_key, timeout=timeout)

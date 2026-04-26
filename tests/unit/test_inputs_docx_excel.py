@@ -52,7 +52,7 @@ def test_parse_docx_with_image_uses_vision_and_writes_coverage(monkeypatch, tmp_
         return "Image 001-image1.png: На экране видна кнопка «Оплатить»."
 
     monkeypatch.setattr(LlmClient, "describe_images_for_requirements", fake_describe)
-    cfg = AppConfig.model_validate({"llm": {"api_key": "test-key"}})
+    cfg = AppConfig.model_validate({"llm": {"api_key": "realistic_long_test_key_value"}})
 
     items = parse_requirements([str(docx_path)], cfg, coverage_report_path=coverage_path, session_dir=tmp_path)
 

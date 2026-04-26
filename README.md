@@ -21,11 +21,39 @@ chmod +x run_chat.sh
 
 Launcher сам создаст `.venv`, установит зависимости, создаст `ai-tester.config.yaml`, спросит `OPENAI_API_KEY`, сохранит его в локальный `.env` и откроет chat mode в браузере.
 
-Если ключ не задан, UI покажет понятную подсказку. Минимальный `.env`:
+Если ключ не задан или вместо него осталась заглушка, UI покажет блок настройки AI и позволит вставить ключ прямо в браузере.
+
+## Как добавить OPENAI_API_KEY
+
+Рекомендуемый способ для новичка — через браузер:
+
+1. Запустите `run_chat_windows.bat` или `run_chat.sh`.
+2. Откройте UI.
+3. Вставьте ключ в поле `OPENAI_API_KEY`.
+4. Включите `Сохранить ключ в локальный .env`, если не хотите вводить ключ при каждом запуске.
+5. Нажмите `Сохранить ключ`.
+
+Через `.env` в корне проекта:
 
 ```env
 OPENAI_API_KEY=sk-...
 ```
+
+Через переменную окружения:
+
+Windows:
+
+```bash
+set OPENAI_API_KEY=sk-...
+```
+
+macOS/Linux:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Замените `sk-...` на реальный ключ. Файл `.env` не коммитится, ключ не показывается в UI после сохранения и не пишется в логи.
 
 ## Что это
 
@@ -62,7 +90,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 copy ai-tester.config.example.yaml ai-tester.config.yaml
-set OPENAI_API_KEY=your_key_here
+set OPENAI_API_KEY=sk-...
 ai-qahelper chat
 ```
 
@@ -75,7 +103,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp ai-tester.config.example.yaml ai-tester.config.yaml
-export OPENAI_API_KEY=your_key_here
+export OPENAI_API_KEY=sk-...
 ai-qahelper chat
 ```
 

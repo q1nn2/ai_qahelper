@@ -51,18 +51,25 @@ if not exist ".env" (
     )
 )
 
-if "%OPENAI_API_KEY%"=="" (
-    findstr /R /C:"^OPENAI_API_KEY=..*" ".env" >nul 2>nul
-    if %ERRORLEVEL% NEQ 0 (
-        echo.
-        echo Введите OPENAI_API_KEY. Он будет сохранён только в локальный файл .env.
-        set /p OPENAI_API_KEY=OPENAI_API_KEY: 
-        if "!OPENAI_API_KEY!"=="" (
-            echo [Ошибка] OPENAI_API_KEY не задан.
-            pause
-            exit /b 1
-        )
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='.env'; $lines=@(); if (Test-Path $p) { $lines=Get-Content $p | Where-Object { $_ -notmatch '^OPENAI_API_KEY=' } }; $lines + 'OPENAI_API_KEY=!OPENAI_API_KEY!' | Set-Content -Encoding UTF8 $p"
+python -c "from ai_qahelper.config import get_openai_api_key; raise SystemExit(0 if get_openai_api_key() else 1)" >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo Введите OPENAI_API_KEY. Он будет сохранён только в локальный файл .env.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$secure=Read-Host 'OPENAI_API_KEY' -AsSecureString; $ptr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { $key=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr); if ([string]::IsNullOrWhiteSpace($key)) { exit 1 }; $trimmed=$key.Trim(); $lower=$trimmed.ToLowerInvariant(); if ($lower -eq 'your_key_here' -or $lower -eq 'sk-...' -or $lower.Contains('changeme') -or $lower.Contains('placeholder') -or $lower.Contains('example') -or $trimmed.Length -lt 20) { exit 2 }; $p='.env'; $lines=@(); if (Test-Path $p) { $lines=Get-Content $p | Where-Object { $_ -notmatch '^OPENAI_API_KEY=' } }; $lines + ('OPENAI_API_KEY=' + $trimmed) | Set-Content -Encoding UTF8 $p } finally { if ($ptr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) } }"
+    if !ERRORLEVEL! EQU 1 (
+        echo [Ошибка] OPENAI_API_KEY не задан.
+        pause
+        exit /b 1
+    )
+    if !ERRORLEVEL! EQU 2 (
+        echo [Ошибка] OPENAI_API_KEY похож на placeholder.
+        pause
+        exit /b 1
+    )
+    if !ERRORLEVEL! NEQ 0 (
+        echo [Ошибка] Не удалось сохранить OPENAI_API_KEY.
+        pause
+        exit /b 1
     )
 )
 

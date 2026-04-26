@@ -40,11 +40,30 @@ if [ ! -f ".env" ]; then
   fi
 fi
 
-if [ -z "${OPENAI_API_KEY:-}" ] && ! grep -Eq '^OPENAI_API_KEY=..+' ".env"; then
+is_placeholder_api_key() {
+  key="$(printf '%s' "${1:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  lower="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+  [ -z "$key" ] && return 0
+  [ "$lower" = "your_key_here" ] && return 0
+  [ "$lower" = "sk-..." ] && return 0
+  case "$lower" in
+    *changeme*|*placeholder*|*example*) return 0 ;;
+  esac
+  [ "${#key}" -lt 20 ] && return 0
+  return 1
+}
+
+env_file_key=""
+if [ -f ".env" ]; then
+  env_file_key="$(grep -E '^OPENAI_API_KEY=' ".env" | tail -n 1 | sed 's/^OPENAI_API_KEY=//')"
+fi
+
+if is_placeholder_api_key "${OPENAI_API_KEY:-}" && is_placeholder_api_key "$env_file_key"; then
   echo
   echo "Введите OPENAI_API_KEY. Он будет сохранён только в локальный файл .env."
-  read -r -p "OPENAI_API_KEY: " OPENAI_API_KEY
-  if [ -z "$OPENAI_API_KEY" ]; then
+  read -r -s -p "OPENAI_API_KEY: " OPENAI_API_KEY
+  echo
+  if is_placeholder_api_key "$OPENAI_API_KEY"; then
     echo "[Ошибка] OPENAI_API_KEY не задан."
     exit 1
   fi

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -16,10 +15,24 @@ from ai_qahelper.chat_agent import (
     load_agent_memory,
 )
 from ai_qahelper.chat_planner import ChatPlan
-from ai_qahelper.config import load_project_env
+from ai_qahelper.config import (
+    get_openai_api_key,
+    is_placeholder_api_key,
+    load_project_env,
+    save_openai_api_key_to_env,
+    set_runtime_openai_api_key,
+)
 from ai_qahelper.friendly_errors import format_technical_error, format_user_error
 
 SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
+MAIN_SCREEN_CAPTION = (
+    "Загрузите требования или укажите URL тестируемого стенда, затем сформулируйте QA-задачу: "
+    "сгенерировать тест-кейсы, чек-лист, negative/smoke проверки или выполнить первичный анализ сайта."
+)
+MISSING_API_KEY_MESSAGE = (
+    "OPENAI_API_KEY не найден. Вставьте ключ ниже и нажмите “Сохранить”.\n"
+    "Ключ можно сохранить только на текущую сессию или записать в локальный .env."
+)
 
 
 def _init_state() -> None:
@@ -250,7 +263,7 @@ def _render_quick_actions() -> str | None:
 
 def _render_welcome() -> None:
     st.info(
-        "Загрузите требования или вставьте ссылку на сайт, затем напишите задачу обычным языком.",
+        "Начните с загрузки требований в боковой панели или укажите URL тестируемого стенда для Site Discovery.",
         icon="💡",
     )
     col1, col2, col3 = st.columns(3)
@@ -278,13 +291,32 @@ def _render_welcome() -> None:
 
 
 def _render_setup_warning() -> None:
-    if os.getenv("OPENAI_API_KEY"):
+    st.subheader("Настройка AI")
+    if get_openai_api_key():
+        st.success("OPENAI_API_KEY найден. AI готов к работе.")
         return
+
     st.warning(
-        "Не найден OPENAI_API_KEY. Добавьте строку `OPENAI_API_KEY=sk-...` в файл `.env` "
-        "или запустите `run_chat_windows.bat` / `run_chat.sh`, чтобы launcher спросил ключ автоматически.",
+        MISSING_API_KEY_MESSAGE,
         icon="⚠️",
     )
+    api_key = st.text_input("OPENAI_API_KEY", type="password")
+    save_to_env = st.checkbox("Сохранить ключ в локальный .env")
+    if not st.button("Сохранить ключ"):
+        return
+    if not api_key.strip():
+        st.error("Введите OPENAI_API_KEY.")
+        return
+    if is_placeholder_api_key(api_key):
+        st.error("Введите корректный OPENAI_API_KEY.")
+        return
+
+    set_runtime_openai_api_key(api_key)
+    st.session_state["OPENAI_API_KEY"] = api_key.strip()
+    if save_to_env:
+        save_openai_api_key_to_env(api_key)
+    st.success("OPENAI_API_KEY сохранён. AI готов к работе.")
+    st.rerun()
 
 
 def _render_artifact_previews(response: ChatResponse) -> None:
@@ -351,7 +383,7 @@ def main() -> None:
     uploaded_paths = _render_sidebar()
 
     st.title("AI QAHelper — помощник тестировщика")
-    st.caption("Загрузите требования или вставьте ссылку на сайт, затем напишите задачу обычным языком.")
+    st.caption(MAIN_SCREEN_CAPTION)
     _render_setup_warning()
     if not st.session_state.messages:
         _render_welcome()
