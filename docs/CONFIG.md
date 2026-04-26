@@ -16,7 +16,19 @@ cp ai-tester.config.example.yaml ai-tester.config.yaml
 
 ## API keys
 
-OpenAI-compatible ключ можно задать через переменную окружения:
+OpenAI-compatible ключ можно задать через `.env` в корне проекта:
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
+`python-dotenv` загружает `.env` без перезаписи уже заданных системных переменных, поэтому порядок такой:
+
+1. системная/пользовательская переменная окружения;
+2. значение из `.env`;
+3. `llm.api_key` в локальном `ai-tester.config.yaml`, если вы явно его добавили.
+
+Также ключ можно задать через переменную окружения:
 
 ```bash
 set OPENAI_API_KEY=your_key_here
@@ -29,6 +41,8 @@ export OPENAI_API_KEY=your_key_here
 ```
 
 В конфиге поле `llm.api_key_env` должно быть именем переменной, например `OPENAI_API_KEY`, а не самим секретом.
+
+Если ключа нет, chat mode покажет ошибку `Не найден OPENAI_API_KEY` и пример исправления.
 
 ## Основные параметры
 

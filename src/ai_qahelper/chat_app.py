@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from ai_qahelper.chat_agent import (
     load_agent_memory,
 )
 from ai_qahelper.chat_planner import ChatPlan
+from ai_qahelper.config import load_project_env
 
 SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
 
@@ -58,70 +60,73 @@ def _save_uploaded_files(uploaded_files: list[Any]) -> list[str]:
 
 def _render_sidebar() -> list[str]:
     st.sidebar.header("Контекст")
-    st.sidebar.caption("Файлы требований: .md/.txt/.pdf/.docx/.xlsx/.xls")
+    st.sidebar.subheader("Файлы требований")
+    st.sidebar.caption(".md, .txt, .pdf, .docx, .xlsx, .xls")
     uploaded_files = st.sidebar.file_uploader(
         "Загрузить требования",
         type=SUPPORTED_UPLOAD_TYPES,
         accept_multiple_files=True,
         label_visibility="collapsed",
     )
-    target_url = st.sidebar.text_input("Target URL", value=st.session_state.last_target_url)
+    target_url = st.sidebar.text_input("Ссылка на тестируемый сайт", value=st.session_state.last_target_url)
     if target_url:
         st.session_state.last_target_url = target_url
     figma_file_key = st.sidebar.text_input("Figma file key", value=st.session_state.last_figma_file_key)
     st.session_state.last_figma_file_key = figma_file_key
-    session_id = st.sidebar.text_input("Session ID", value=st.session_state.last_session_id)
+    session_id = st.sidebar.text_input("ID текущей сессии", value=st.session_state.last_session_id)
     st.session_state.last_session_id = session_id
-    output = st.sidebar.selectbox("output", ["testcases", "checklist"], index=0)
+    output = st.sidebar.selectbox("Тип результата", ["testcases", "checklist"], index=0)
     st.session_state.output = output
-    max_cases = st.sidebar.number_input("max_cases", min_value=1, max_value=200, value=30)
+    max_cases = st.sidebar.number_input("Количество проверок", min_value=1, max_value=200, value=30)
     st.session_state.max_cases = int(max_cases)
-    st.session_state.with_bug_drafts = st.sidebar.checkbox("with_bug_drafts", value=False)
-    st.session_state.skip_test_analysis = st.sidebar.checkbox("skip_test_analysis", value=False)
-    st.sidebar.header("Site Discovery")
-    st.session_state.site_discovery_max_pages = int(
-        st.sidebar.number_input(
-            "max_pages",
-            min_value=1,
-            max_value=20,
-            value=int(st.session_state.site_discovery_max_pages),
-            help="Безопасный лимит страниц для exploratory discovery.",
+    st.sidebar.subheader("Дополнительные настройки")
+    st.session_state.with_bug_drafts = st.sidebar.checkbox("Создавать черновики bug reports", value=False)
+    st.session_state.skip_test_analysis = st.sidebar.checkbox("Пропустить отдельный test analysis", value=False)
+    with st.sidebar.expander("Расширенные настройки Site Discovery"):
+        st.session_state.site_discovery_max_pages = int(
+            st.number_input(
+                "Максимум страниц",
+                min_value=1,
+                max_value=20,
+                value=int(st.session_state.site_discovery_max_pages),
+                help="Безопасный лимит страниц для exploratory discovery.",
+            )
         )
-    )
-    st.session_state.site_discovery_max_depth = int(
-        st.sidebar.number_input(
-            "max_depth",
-            min_value=0,
-            max_value=3,
-            value=int(st.session_state.site_discovery_max_depth),
+        st.session_state.site_discovery_max_depth = int(
+            st.number_input(
+                "Глубина переходов",
+                min_value=0,
+                max_value=3,
+                value=int(st.session_state.site_discovery_max_depth),
+            )
         )
-    )
-    st.session_state.site_discovery_same_domain_only = st.sidebar.checkbox(
-        "same_domain_only",
-        value=st.session_state.site_discovery_same_domain_only,
-    )
-    st.session_state.site_discovery_timeout_seconds = int(
-        st.sidebar.number_input(
-            "timeout_seconds",
-            min_value=1,
-            max_value=60,
-            value=int(st.session_state.site_discovery_timeout_seconds),
+        st.session_state.site_discovery_same_domain_only = st.checkbox(
+            "Только тот же домен",
+            value=st.session_state.site_discovery_same_domain_only,
         )
-    )
-    st.session_state.site_discovery_use_playwright = st.sidebar.checkbox(
-        "use_playwright",
-        value=st.session_state.site_discovery_use_playwright,
-    )
-    st.session_state.site_discovery_create_screenshots = st.sidebar.checkbox(
-        "создавать screenshots",
-        value=st.session_state.site_discovery_create_screenshots,
-    )
+        st.session_state.site_discovery_timeout_seconds = int(
+            st.number_input(
+                "Таймаут, секунд",
+                min_value=1,
+                max_value=60,
+                value=int(st.session_state.site_discovery_timeout_seconds),
+            )
+        )
+        st.session_state.site_discovery_use_playwright = st.checkbox(
+            "Использовать Playwright",
+            value=st.session_state.site_discovery_use_playwright,
+        )
+        st.session_state.site_discovery_create_screenshots = st.checkbox(
+            "Создавать screenshots",
+            value=st.session_state.site_discovery_create_screenshots,
+        )
+    st.sidebar.subheader("Google Sheets export")
     st.session_state.test_cases_sheet_url = st.sidebar.text_input(
-        "Google Sheets URL для тест-кейсов",
+        "URL таблицы для тест-кейсов",
         value=st.session_state.test_cases_sheet_url,
     )
     st.session_state.bug_reports_sheet_url = st.sidebar.text_input(
-        "Google Sheets URL для баг-репортов",
+        "URL таблицы для баг-репортов",
         value=st.session_state.bug_reports_sheet_url,
     )
     if st.sidebar.button("Очистить историю"):
@@ -223,18 +228,55 @@ def _render_quick_actions() -> str | None:
     actions = [
         ("Сделать тест-кейсы", "Сделай тест-кейсы"),
         ("Сделать чек-лист", "Сделай чек-лист"),
-        ("Negative cases", "Теперь сделай negative test cases"),
-        ("Smoke cases", "Сделай smoke test cases"),
+        ("Smoke", "Сделай smoke test cases"),
+        ("Negative", "Теперь сделай negative test cases"),
         ("Bug reports", "Создай баг-репорты"),
         ("Autotests", "Подготовь Playwright/pytest автотесты, но не запускай"),
-        ("Export XLSX", "Подготовь export XLSX"),
     ]
-    st.subheader("Быстрые действия")
     columns = st.columns(4)
     for idx, (label, command) in enumerate(actions):
         if columns[idx % 4].button(label):
             return command
     return None
+
+
+def _render_welcome() -> None:
+    st.info(
+        "Загрузите требования или вставьте ссылку на сайт, затем напишите задачу обычным языком.",
+        icon="💡",
+    )
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.subheader("Быстрый старт")
+        st.write("1. Загрузите requirements в боковой панели.")
+        st.write("2. Укажите ссылку на тестируемый сайт.")
+        st.write("3. Нажмите быструю кнопку или напишите команду.")
+    with col2:
+        st.subheader("Примеры команд")
+        st.write("- `Сделай smoke test cases`")
+        st.write("- `Теперь negative cases`")
+        st.write("- `Создай баг-репорты`")
+        st.write("- `Подготовь автотесты, но не запускай`")
+    with col3:
+        st.subheader("Что умеет агент")
+        st.write("- Test cases и checklists")
+        st.write("- Site Discovery без требований")
+        st.write("- Quality reports и dedup")
+        st.write("- Playwright/pytest starter tests")
+    st.caption(
+        "Если требований нет — вставьте Target URL и напишите: "
+        "`Проанализируй сайт и сделай smoke test cases`."
+    )
+
+
+def _render_setup_warning() -> None:
+    if os.getenv("OPENAI_API_KEY"):
+        return
+    st.warning(
+        "Не найден OPENAI_API_KEY. Добавьте строку `OPENAI_API_KEY=sk-...` в файл `.env` "
+        "или запустите `run_chat_windows.bat` / `run_chat.sh`, чтобы launcher спросил ключ автоматически.",
+        icon="⚠️",
+    )
 
 
 def _render_artifact_previews(response: ChatResponse) -> None:
@@ -247,7 +289,7 @@ def _render_artifact_previews(response: ChatResponse) -> None:
             st.write(f"Путь: `{path}`")
             if path.is_file():
                 st.download_button(
-                    "Скачать",
+                    _download_label(path),
                     data=path.read_bytes(),
                     file_name=path.name,
                     key=f"download-{artifact}",
@@ -278,14 +320,34 @@ def _render_artifact_preview(path: Path) -> None:
         st.caption("Preview для Excel/CSV не открывается в UI, файл можно скачать кнопкой выше.")
 
 
+def _download_label(path: Path) -> str:
+    name = path.name
+    if name.endswith(".xlsx") and "test-cases" in name:
+        return "Скачать test-cases.xlsx"
+    if name.endswith(".xlsx") and "checklist" in name:
+        return "Скачать checklist.xlsx"
+    if "quality-report" in name:
+        return "Скачать quality report"
+    if "exploratory-report" in name:
+        return "Скачать exploratory report"
+    if path.suffix.lower() == ".json":
+        return "Скачать JSON"
+    return f"Скачать {name}"
+
+
 def main() -> None:
     st.set_page_config(page_title="AI QAHelper Chat", page_icon="🧪", layout="wide")
+    load_project_env()
     _init_state()
 
     uploaded_paths = _render_sidebar()
 
-    st.title("AI QAHelper Chat")
-    st.caption("Пиши обычным языком. Агент построит план и выполнит QA pipeline по шагам.")
+    st.title("AI QAHelper — помощник тестировщика")
+    st.caption("Загрузите требования или вставьте ссылку на сайт, затем напишите задачу обычным языком.")
+    _render_setup_warning()
+    if not st.session_state.messages:
+        _render_welcome()
+    st.subheader("Быстрые действия")
     quick_prompt = _render_quick_actions()
 
     for message in st.session_state.messages:
@@ -333,7 +395,11 @@ def main() -> None:
             try:
                 response = handle_message(context, prompt)
             except Exception as exc:  # noqa: BLE001 - show user-friendly chat error
-                response = ChatResponse(f"Не получилось выполнить действие: `{exc}`")
+                response = ChatResponse(
+                    "Не удалось выполнить действие.\n\n"
+                    f"Что случилось: {exc}\n\n"
+                    "Что сделать: проверьте входные данные и попробуйте ещё раз."
+                )
         if response.plan:
             _render_plan(response.plan)
         st.markdown(response.message)

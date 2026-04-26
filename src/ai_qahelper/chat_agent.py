@@ -196,10 +196,11 @@ def handle_message(
         results = (executor or PlanExecutor()).execute(context, plan, message)
     except Exception as exc:  # noqa: BLE001
         action_type = plan.actions[0].type if plan.actions else "unknown"
-        missing_inputs = _missing_inputs_for_error(str(exc))
+        friendly = _friendly_error_message(exc)
+        missing_inputs = _missing_inputs_for_error(friendly)
         _update_agent_memory(context, [], [], missing_inputs=missing_inputs)
         return ChatResponse(
-            f"Не получилось выполнить `{action_type}`: {type(exc).__name__}: {exc}",
+            friendly,
             action_type,
             plan=plan,
             summary_for_user="Действие не выполнено.",
@@ -407,6 +408,8 @@ def _missing_inputs_for_clarification(question: str) -> list[str]:
         missing.append("requirements")
     if "target url" in text or "url" in text:
         missing.append("target_url")
+    if "openai_api_key" in text or "api key" in text:
+        missing.append("OPENAI_API_KEY")
     if not missing:
         missing.append("input")
     return missing
@@ -414,6 +417,52 @@ def _missing_inputs_for_clarification(question: str) -> list[str]:
 
 def _missing_inputs_for_error(error: str) -> list[str]:
     return _missing_inputs_for_clarification(error)
+
+
+def _friendly_error_message(exc: Exception) -> str:
+    text = str(exc)
+    lowered = text.lower()
+    if "openai_api_key" in lowered or "api key" in lowered:
+        return (
+            "Не найден OPENAI_API_KEY.\n\n"
+            "Что сделать: добавьте ключ в файл `.env` в корне проекта или задайте переменную окружения.\n\n"
+            "Пример: `OPENAI_API_KEY=sk-...`"
+        )
+    if "загрузи требования" in lowered or "requirements" in lowered:
+        return (
+            "Не загружены требования.\n\n"
+            "Что сделать: загрузите файл требований в боковой панели или вставьте ссылку на документ.\n\n"
+            "Пример: загрузите `requirements.docx` и напишите `Сделай smoke test cases`."
+        )
+    if "target url" in lowered:
+        return (
+            "Не указан Target URL.\n\n"
+            "Что сделать: вставьте ссылку на тестируемый сайт в поле `Ссылка на тестируемый сайт`.\n\n"
+            "Пример: `https://example.com`."
+        )
+    if "playwright" in lowered:
+        return (
+            "Не удалось запустить Playwright.\n\n"
+            "Что сделать: установите браузеры Playwright или выключите Playwright в расширенных настройках Site Discovery.\n\n"
+            "Пример: `python -m playwright install`."
+        )
+    if "google sheets" in lowered or "gspread" in lowered:
+        return (
+            "Не удалось выгрузить в Google Sheets.\n\n"
+            "Что сделать: проверьте ссылки на таблицы и `GOOGLE_SERVICE_ACCOUNT_JSON`.\n\n"
+            "Пример: добавьте путь к service account JSON в `.env`."
+        )
+    if isinstance(exc, OSError):
+        return (
+            "Не удалось прочитать файл.\n\n"
+            "Что сделать: проверьте, что файл существует, не открыт эксклюзивно другой программой и доступен для чтения.\n\n"
+            "Пример: загрузите файл заново через боковую панель."
+        )
+    return (
+        "Не удалось выполнить действие.\n\n"
+        f"Что случилось: {text}\n\n"
+        "Что сделать: проверьте входные данные и попробуйте ещё раз."
+    )
 
 
 def _clarification_next_steps(missing_inputs: list[str]) -> list[str]:

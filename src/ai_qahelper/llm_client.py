@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+class MissingApiKeyError(RuntimeError):
+    """Raised when the LLM API key is not configured."""
+
+
 def _extract_json_text(raw: str) -> str:
     text = (raw or "").strip()
     if not text:
@@ -55,9 +59,10 @@ class LlmClient:
     def __init__(self, config: LlmConfig) -> None:
         api_key = (config.api_key or "").strip() or os.getenv(config.api_key_env)
         if not api_key:
-            raise RuntimeError(
-                f"Missing API key: set llm.api_key in ai-tester.config.yaml, "
-                f"env var {config.api_key_env}, or a .env file in the project root with {config.api_key_env}=..."
+            raise MissingApiKeyError(
+                f"Не найден {config.api_key_env}. "
+                f"Добавьте строку {config.api_key_env}=sk-... в файл .env "
+                "или задайте переменную окружения перед запуском."
             )
         timeout = float(config.request_timeout_seconds)
         self._client = OpenAI(base_url=config.base_url, api_key=api_key, timeout=timeout)
