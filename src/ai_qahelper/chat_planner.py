@@ -186,6 +186,9 @@ FALLBACK_DOC_ALIASES = (
     "провер",
     "документац",
     "шаблон",
+    "export",
+    "xlsx",
+    "excel",
 )
 
 
@@ -497,6 +500,17 @@ def _apply_clarification_rules(
             )
         return plan
     if not can_start_from_inputs:
+        if not target_url:
+            return plan.model_copy(
+                update={
+                    "needs_clarification": True,
+                    "clarification_question": (
+                        "Не вижу требований, target URL или активной сессии. "
+                        "Хочешь загрузить требования, вставить URL сайта для Site Discovery "
+                        "или продолжить существующую сессию по Session ID?"
+                    ),
+                }
+            )
         return plan.model_copy(
             update={
                 "needs_clarification": True,

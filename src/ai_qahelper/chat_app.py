@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
-from ai_qahelper.chat_agent import ChatContext, ChatResponse, handle_message
+from ai_qahelper.chat_agent import (
+    AgentMemory,
+    ChatContext,
+    ChatResponse,
+    handle_message,
+    load_agent_memory,
+)
 from ai_qahelper.chat_planner import ChatPlan
 
 SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
@@ -28,6 +35,7 @@ def _init_state() -> None:
     st.session_state.setdefault("site_discovery_create_screenshots", True)
     st.session_state.setdefault("pending_plan", None)
     st.session_state.setdefault("pending_message", "")
+    st.session_state.setdefault("agent_context", {})
 
 
 def _remember(role: str, content: str) -> None:
@@ -125,9 +133,12 @@ def _render_sidebar() -> list[str]:
             "last_figma_file_key",
             "pending_plan",
             "pending_message",
+            "agent_context",
         ]:
             st.session_state.pop(key, None)
         st.rerun()
+    if st.session_state.last_session_id and not st.session_state.agent_context:
+        st.session_state.agent_context = load_agent_memory(st.session_state.last_session_id).to_dict()
     if st.session_state.last_session_id:
         st.sidebar.success(f"Активная сессия: {st.session_state.last_session_id}")
     uploaded_paths = _save_uploaded_files(uploaded_files)
@@ -154,6 +165,7 @@ def _build_context(requirements: list[str]) -> ChatContext:
         site_discovery_timeout_seconds=st.session_state.site_discovery_timeout_seconds,
         site_discovery_use_playwright=st.session_state.site_discovery_use_playwright,
         site_discovery_create_screenshots=st.session_state.site_discovery_create_screenshots,
+        agent_memory=AgentMemory.from_dict(st.session_state.agent_context),
     )
 
 
@@ -171,6 +183,7 @@ def _sync_context(context: ChatContext) -> None:
     st.session_state.site_discovery_timeout_seconds = context.site_discovery_timeout_seconds
     st.session_state.site_discovery_use_playwright = context.site_discovery_use_playwright
     st.session_state.site_discovery_create_screenshots = context.site_discovery_create_screenshots
+    st.session_state.agent_context = context.agent_memory.to_dict()
 
 
 def _render_plan(plan: ChatPlan) -> None:
@@ -198,6 +211,73 @@ def _render_step_results(response: ChatResponse) -> None:
                     st.write(f"**{key}:** `{value}`")
 
 
+def _render_next_steps(response: ChatResponse) -> None:
+    if not response.suggested_next_steps:
+        return
+    st.subheader("Что можно сделать дальше")
+    for step in response.suggested_next_steps:
+        st.write(f"- {step}")
+
+
+def _render_quick_actions() -> str | None:
+    actions = [
+        ("Сделать тест-кейсы", "Сделай тест-кейсы"),
+        ("Сделать чек-лист", "Сделай чек-лист"),
+        ("Negative cases", "Теперь сделай negative test cases"),
+        ("Smoke cases", "Сделай smoke test cases"),
+        ("Bug reports", "Создай баг-репорты"),
+        ("Autotests", "Подготовь Playwright/pytest автотесты, но не запускай"),
+        ("Export XLSX", "Подготовь export XLSX"),
+    ]
+    st.subheader("Быстрые действия")
+    columns = st.columns(4)
+    for idx, (label, command) in enumerate(actions):
+        if columns[idx % 4].button(label):
+            return command
+    return None
+
+
+def _render_artifact_previews(response: ChatResponse) -> None:
+    if not response.artifacts:
+        return
+    st.subheader("Артефакты")
+    for artifact in response.artifacts:
+        path = Path(artifact)
+        with st.expander(path.name, expanded=path.suffix.lower() in {".md", ".json"}):
+            st.write(f"Путь: `{path}`")
+            if path.is_file():
+                st.download_button(
+                    "Скачать",
+                    data=path.read_bytes(),
+                    file_name=path.name,
+                    key=f"download-{artifact}",
+                )
+                _render_artifact_preview(path)
+            else:
+                st.caption("Файл пока не найден локально или это директория.")
+
+
+def _render_artifact_preview(path: Path) -> None:
+    suffix = path.suffix.lower()
+    if suffix == ".md":
+        st.markdown(path.read_text(encoding="utf-8")[:5000])
+    elif suffix == ".json":
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            st.caption("JSON preview недоступен: файл не удалось разобрать.")
+            return
+        if isinstance(data, list):
+            st.write(f"JSON: {len(data)} элементов")
+            st.json(data[:3])
+        elif isinstance(data, dict):
+            st.write(f"JSON keys: {', '.join(list(data.keys())[:10])}")
+            summary = data.get("summary") if isinstance(data.get("summary"), dict) else data
+            st.json(summary)
+    elif suffix in {".csv", ".xlsx", ".xls"}:
+        st.caption("Preview для Excel/CSV не открывается в UI, файл можно скачать кнопкой выше.")
+
+
 def main() -> None:
     st.set_page_config(page_title="AI QAHelper Chat", page_icon="🧪", layout="wide")
     _init_state()
@@ -206,6 +286,7 @@ def main() -> None:
 
     st.title("AI QAHelper Chat")
     st.caption("Пиши обычным языком. Агент построит план и выполнит QA pipeline по шагам.")
+    quick_prompt = _render_quick_actions()
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -237,7 +318,7 @@ def main() -> None:
                 _remember("assistant", "Ок, действие отменено.")
                 st.rerun()
 
-    prompt = st.chat_input("Напиши задачу: сделай тест-кейсы, запусти автотесты, создай баги...")
+    prompt = quick_prompt or st.chat_input("Напиши задачу: сделай тест-кейсы, запусти автотесты, создай баги...")
     if not prompt:
         return
 
@@ -256,6 +337,10 @@ def main() -> None:
         if response.plan:
             _render_plan(response.plan)
         st.markdown(response.message)
+        if response.missing_inputs:
+            st.warning("Не хватает данных: " + ", ".join(response.missing_inputs))
+        _render_next_steps(response)
+        _render_artifact_previews(response)
         _render_step_results(response)
     if response.needs_confirmation and response.plan:
         st.session_state.pending_plan = response.plan.model_dump(mode="json")

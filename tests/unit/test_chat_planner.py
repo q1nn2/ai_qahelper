@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from ai_qahelper.chat_agent import ChatContext, handle_message, update_context_from_message
+from ai_qahelper.chat_agent import (
+    AgentMemory,
+    ChatContext,
+    handle_message,
+    load_agent_memory,
+    save_agent_memory,
+    update_context_from_message,
+)
 from ai_qahelper.chat_executor import PlanExecutor
 from ai_qahelper.chat_planner import ChatPlan, PlanAction, plan_message
 from ai_qahelper.models import BugReport, ChecklistItem
@@ -105,6 +112,82 @@ def test_missing_requirements_and_session_asks_clarification() -> None:
     assert response.plan is not None
     assert response.plan.needs_clarification is True
     assert "Загрузи требования" in response.message
+    assert "requirements" in response.missing_inputs
+    assert response.can_continue is False
+
+
+def test_missing_all_inputs_returns_friendly_options() -> None:
+    response = handle_message(ChatContext(), "сделай тест-кейсы", allow_llm=False)
+
+    assert response.plan is not None
+    assert response.plan.needs_clarification is True
+    assert "загрузить requirements" in response.message
+    assert {"requirements", "target_url"}.issubset(set(response.missing_inputs))
+    assert response.suggested_next_steps
+
+
+def test_chat_response_contains_agent_fields(monkeypatch) -> None:
+    class FakeExecutor:
+        def execute(self, context, plan, user_message=""):
+            context.session_id = "s1"
+            context.output = "testcases"
+            return [
+                {
+                    "session_id": "s1",
+                    "title": "Smoke testcases",
+                    "test_cases_path": "runs/s1/test-cases.json",
+                    "summary": {"test_cases": 3},
+                }
+            ]
+
+    monkeypatch.setattr("ai_qahelper.chat_agent.save_agent_memory", lambda memory: None)
+    plan = ChatPlan(actions=[PlanAction(type="generate_docs", artifact_type="testcases", focus="smoke")])
+
+    response = handle_message(ChatContext(session_id="s1"), "сделай smoke", plan=plan, executor=FakeExecutor())
+
+    assert response.summary_for_user
+    assert response.artifacts == ["runs/s1/test-cases.json"]
+    assert "Сделать negative test cases" in response.suggested_next_steps
+    assert response.missing_inputs == []
+    assert response.can_continue is True
+
+
+def test_agent_memory_persists_to_session_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("ai_qahelper.chat_agent.session_path", lambda session_id: tmp_path / "runs" / session_id)
+    memory = AgentMemory(
+        last_requirements=["requirements.md"],
+        target_url="https://example.com",
+        session_id="s1",
+        last_artifact="runs/s1/test-cases.json",
+        documentation_type="testcases",
+        recent_user_actions=["сделай тест-кейсы"],
+        suggested_next_steps=["Сделать чек-лист"],
+    )
+
+    path = save_agent_memory(memory)
+    loaded = load_agent_memory("s1")
+
+    assert path == tmp_path / "runs" / "s1" / "agent_context.json"
+    assert loaded.session_id == "s1"
+    assert loaded.last_requirements == ["requirements.md"]
+    assert loaded.suggested_next_steps == ["Сделать чек-лист"]
+
+
+def test_continue_uses_agent_memory_session(monkeypatch) -> None:
+    class FakeExecutor:
+        def execute(self, context, plan, user_message=""):
+            assert context.session_id == "s1"
+            return [{"session_id": "s1", "title": "testcases", "test_cases_path": "runs/s1/test-cases.json"}]
+
+    monkeypatch.setattr("ai_qahelper.chat_agent.save_agent_memory", lambda memory: None)
+    context = ChatContext(agent_memory=AgentMemory(session_id="s1", documentation_type="testcases"))
+
+    response = handle_message(context, "продолжай", allow_llm=False, executor=FakeExecutor())
+
+    assert response.plan is not None
+    assert response.plan.actions[0].type == "generate_docs"
+    assert context.session_id == "s1"
+    assert response.can_continue is True
 
 
 def test_site_discovery_message_creates_discover_plan() -> None:

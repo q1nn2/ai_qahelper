@@ -37,7 +37,7 @@ class PlanExecutor:
         return handler(context, action, user_message)
 
 
-def collect_artifacts(results: list[dict]) -> list[str]:
+def collect_artifact_paths(results: list[dict]) -> list[str]:
     keys = [
         "unified_model_path",
         "input_coverage_report_path",
@@ -61,9 +61,26 @@ def collect_artifacts(results: list[dict]) -> list[str]:
     for result in results:
         for key in keys:
             value = result.get(key)
-            if value and value not in artifacts:
-                artifacts.append(f"`{value}`")
+            artifact = str(value) if value else ""
+            if artifact and artifact not in artifacts:
+                artifacts.append(artifact)
+                artifacts.extend(path for path in _related_export_paths(artifact) if path not in artifacts)
     return artifacts
+
+
+def collect_artifacts(results: list[dict]) -> list[str]:
+    return [f"`{path}`" for path in collect_artifact_paths(results)]
+
+
+def _related_export_paths(path: str) -> list[str]:
+    artifact_path = Path(path)
+    if artifact_path.suffix.lower() != ".json" or not artifact_path.is_file():
+        return []
+    return [
+        str(candidate)
+        for candidate in [artifact_path.with_suffix(".csv"), artifact_path.with_suffix(".xlsx")]
+        if candidate.is_file()
+    ]
 
 
 def _handle_help(context: Any, action: PlanAction, user_message: str) -> dict:

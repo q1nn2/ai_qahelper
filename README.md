@@ -11,6 +11,7 @@ AI QAHelper — локальный AI QA ассистент, который по
 ## Основные возможности
 
 - Natural language chat.
+- Agent Memory для продолжения текущей QA-сессии.
 - Requirements ingestion: `.md`, `.txt`, `.pdf`, `.docx`, `.xlsx`, `.xls`, URL.
 - DOCX: текст, таблицы и изображения через vision.
 - Site Discovery Mode для сайта без требований.
@@ -76,6 +77,31 @@ python -m ai_qahelper.cli chat
 ```text
 Сделай тест-кейсы и покажи quality report.
 ```
+
+## Как общаться с AI QAHelper обычным языком
+
+Chat mode работает как QA-agent: он помнит текущую сессию, последние requirements, target URL, последний созданный артефакт и предлагает следующие шаги после выполнения команды. Если данных не хватает, агент задаст уточняющий вопрос вместо падения с ошибкой.
+
+Пример диалога:
+
+```text
+Пользователь: Вот требования, сделай smoke test cases.
+AI QAHelper: Построю план, создам сессию, сгенерирую smoke test cases и покажу созданные файлы.
+
+Пользователь: Теперь сделай negative cases.
+AI QAHelper: Продолжу текущую session_id и добавлю negative test cases.
+
+Пользователь: Создай баг-репорты.
+AI QAHelper: Подготовлю черновики баг-репортов по текущей сессии.
+
+Пользователь: Покажи quality report.
+AI QAHelper: Покажу путь к report и краткую JSON-сводку.
+
+Пользователь: Подготовь автотесты, но не запускай.
+AI QAHelper: Создам Playwright/pytest starter tests без запуска.
+```
+
+После успешного действия интерфейс показывает блок "Что можно сделать дальше": negative cases, чек-лист, bug reports, autotests, export или quality report. Для созданных JSON/Markdown/CSV/XLSX файлов отображаются путь и кнопка скачивания, а для Markdown/JSON ещё и короткий preview.
 
 ## Что будет на выходе
 
