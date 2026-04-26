@@ -22,8 +22,14 @@ def _format_config_validation_error(exc: ValidationError) -> str:
     return "Неверный конфиг ai-tester.config.yaml:\n" + "\n".join(lines)
 
 
+def load_project_env(path: str | Path = ".env") -> bool:
+    """Load local .env without overriding real environment variables."""
+
+    return load_dotenv(Path(path), override=False)
+
+
 def load_config(path: str | Path = "ai-tester.config.yaml") -> AppConfig:
-    load_dotenv()
+    load_project_env()
     config_path = Path(path).resolve()
     if not config_path.is_file():
         raise FileNotFoundError(

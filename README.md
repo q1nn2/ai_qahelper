@@ -1,5 +1,32 @@
 # AI QAHelper
 
+## Самый простой запуск
+
+Windows:
+
+```bash
+git clone https://github.com/q1nn2/ai_qahelper.git
+cd ai_qahelper
+run_chat_windows.bat
+```
+
+macOS/Linux:
+
+```bash
+git clone https://github.com/q1nn2/ai_qahelper.git
+cd ai_qahelper
+chmod +x run_chat.sh
+./run_chat.sh
+```
+
+Launcher сам создаст `.venv`, установит зависимости, создаст `ai-tester.config.yaml`, спросит `OPENAI_API_KEY`, сохранит его в локальный `.env` и откроет chat mode в браузере.
+
+Если ключ не задан, UI покажет понятную подсказку. Минимальный `.env`:
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
 ## Что это
 
 AI QAHelper — локальный AI QA ассистент, который помогает тестировщику готовить тестовую документацию по требованиям или по фактическому сайту без требований.
@@ -23,6 +50,8 @@ AI QAHelper — локальный AI QA ассистент, который по
 - Optional Google Sheets sync.
 
 ## Быстрый старт
+
+Ручной запуск для тех, кто хочет управлять окружением сам.
 
 Windows:
 
