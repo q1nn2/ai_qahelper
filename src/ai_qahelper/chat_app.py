@@ -17,6 +17,7 @@ from ai_qahelper.chat_agent import (
 )
 from ai_qahelper.chat_planner import ChatPlan
 from ai_qahelper.config import load_project_env
+from ai_qahelper.friendly_errors import format_technical_error, format_user_error
 
 SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
 
@@ -216,6 +217,13 @@ def _render_step_results(response: ChatResponse) -> None:
                     st.write(f"**{key}:** `{value}`")
 
 
+def _render_technical_error(response: ChatResponse) -> None:
+    if not response.technical_error:
+        return
+    with st.expander("Техническая информация"):
+        st.code(response.technical_error)
+
+
 def _render_next_steps(response: ChatResponse) -> None:
     if not response.suggested_next_steps:
         return
@@ -396,9 +404,8 @@ def main() -> None:
                 response = handle_message(context, prompt)
             except Exception as exc:  # noqa: BLE001 - show user-friendly chat error
                 response = ChatResponse(
-                    "Не удалось выполнить действие.\n\n"
-                    f"Что случилось: {exc}\n\n"
-                    "Что сделать: проверьте входные данные и попробуйте ещё раз."
+                    format_user_error(exc),
+                    technical_error=format_technical_error(exc),
                 )
         if response.plan:
             _render_plan(response.plan)
@@ -408,6 +415,7 @@ def main() -> None:
         _render_next_steps(response)
         _render_artifact_previews(response)
         _render_step_results(response)
+        _render_technical_error(response)
     if response.needs_confirmation and response.plan:
         st.session_state.pending_plan = response.plan.model_dump(mode="json")
         st.session_state.pending_message = prompt

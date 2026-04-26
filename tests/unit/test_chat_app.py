@@ -34,3 +34,4 @@ def test_missing_api_key_error_is_friendly(monkeypatch) -> None:
 
     assert "Не найден OPENAI_API_KEY" in response.message
     assert "OPENAI_API_KEY" in response.missing_inputs
+    assert response.technical_error == "RuntimeError: Missing API key: OPENAI_API_KEY"
