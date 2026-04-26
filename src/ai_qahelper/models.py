@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
-import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
@@ -27,6 +27,7 @@ def _coerce_string_list(v: Any) -> list[str]:
     if isinstance(v, str):
         return [v.strip()] if v.strip() else []
     return [str(v).strip()] if str(v).strip() else []
+
 
 # Поля TestCase, доступные для выгрузки в CSV/XLSX (заголовки задаются в test_cases_export).
 TestCaseExportField = Literal[
@@ -75,13 +76,18 @@ class LlmConfig(BaseModel):
     pdf_vision_max_pages: int = 40
     pdf_vision_pages_per_request: int = 2
     pdf_vision_max_output_tokens: int = 4096
+    # Vision: изображения, встроенные в Word DOCX с требованиями.
+    docx_vision: bool = True
+    docx_vision_max_images: int = 30
+    docx_vision_images_per_request: int = 2
+    docx_vision_max_output_tokens: int = 4096
     # Масштаб рендера страницы (2 ≈ ~144 DPI при 72 pt); больше — чётче, но тяжелее для API.
     pdf_vision_render_scale: float = 2.0
     # responses.create с text.format json_schema (Structured Outputs); при ошибке — fallback на разбор текста.
     use_structured_json_output: bool = True
 
     @model_validator(mode="after")
-    def api_key_env_is_var_name(self) -> LlmConfig:
+    def api_key_env_is_var_name(self) -> "LlmConfig":
         name = (self.api_key_env or "").strip()
         if name.startswith("sk-"):
             msg = (
@@ -94,12 +100,13 @@ class LlmConfig(BaseModel):
 
 class AppConfig(BaseModel):
     llm: LlmConfig
-    docs_dir: str = "tests/ai-docs"
-    sessions_dir: str = "tests/ai-sessions"
+    # Рекомендуемая папка для ваших требований (путь в CLI можно указывать любой; поле для ясности в конфиге).
+    docs_dir: str = "examples/input"
+    sessions_dir: str = "runs"
     envs: list[EnvironmentConfig] = Field(default_factory=list)
     # Черновики багов через LLM (отдельный запрос). По умолчанию выключено — только тест-кейсы.
     generate_bug_templates: bool = False
-    # Отдельный LLM-шаг: тест-анализ и техники тест-дизайна перед генерацией кейсов.
+    # Отдельный LLM-шаг: тест-анализ и техники тест-дизайна перед генерацией артефактов.
     generate_test_analysis: bool = True
     # Колонки выгрузки test-cases.csv / .xlsx; None = встроенный русскоязычный шаблон.
     test_cases_export: list[TestCaseExportColumn] | None = None
@@ -151,7 +158,7 @@ class AnalysisTestCondition(BaseModel):
 
 
 class TestAnalysisReport(BaseModel):
-    """Результат тест-анализа перед генерацией тест-кейсов."""
+    """Результат тест-анализа перед генерацией документации."""
 
     scope: str = ""
     assumptions: str = ""
@@ -166,6 +173,16 @@ class TestAnalysisReport(BaseModel):
     def _normalize_str_lists(cls, v: Any) -> list[str]:
         """LLM иногда возвращает объект вместо массива строк — приводим к list[str]."""
         return _coerce_string_list(v)
+
+
+class ChecklistItem(BaseModel):
+    item_id: str
+    area: str = ""
+    check: str
+    expected_result: str
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
+    note: str = ""
+    source_refs: list[str] = Field(default_factory=list)
 
 
 class TestCase(BaseModel):
@@ -216,10 +233,17 @@ class SessionState(BaseModel):
     target_url: HttpUrl
     requirements_files: list[str] = Field(default_factory=list)
     figma_file_key: str | None = None
+    site_model_path: str | None = None
+    exploratory_report_path: str | None = None
+    exploratory_report_md_path: str | None = None
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
+    input_coverage_report_path: str | None = None
+    quality_report_path: str | None = None
+    checklist_path: str | None = None
     test_cases_path: str | None = None
+    dedup_report_path: str | None = None
     bug_reports_path: str | None = None
     generated_tests_dir: str | None = None
     manual_results_path: str | None = None

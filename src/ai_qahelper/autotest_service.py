@@ -50,7 +50,6 @@ def run_manual(session_id: str) -> SessionState:
 
 def generate_autotests(session_id: str) -> SessionState:
     state = load_session(session_id)
-    sdir = session_path(session_id)
     test_cases = [TestCase.model_validate(i) for i in json.loads(Path(state.test_cases_path).read_text(encoding="utf-8"))]
     out_dir = Path("generated_tests") / session_id
     generate_playwright_pytest_tests(test_cases[:25], out_dir, str(state.target_url))

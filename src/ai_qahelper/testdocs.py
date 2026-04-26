@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.models import (
     AnalysisTechnique,
-    AnalysisTestCondition,
     BugReport,
+    ChecklistItem,
     LlmConfig,
     TestAnalysisReport,
     TestCase,
@@ -23,6 +23,10 @@ class TestCaseList(BaseModel):
     test_cases: list[TestCase] = Field(default_factory=list)
 
 
+class ChecklistList(BaseModel):
+    checklist: list[ChecklistItem] = Field(default_factory=list)
+
+
 class BugReportList(BaseModel):
     bug_reports: list[BugReport] = Field(default_factory=list)
 
@@ -32,7 +36,6 @@ class TestAnalysisRoot(BaseModel):
 
 
 def _normalize_bug_reports(raw_items: list[dict[str, Any]], max_items: int) -> list[BugReport]:
-    """Normalize LLM output to strict BugReport schema with safe defaults."""
     items: list[BugReport] = []
     for i, raw in enumerate(raw_items[:max_items], start=1):
         bug_id = str(raw.get("bug_id") or "").strip() or f"BUG-{i:03d}"
@@ -73,6 +76,30 @@ def _normalize_bug_reports(raw_items: list[dict[str, Any]], max_items: int) -> l
     return items
 
 
+def _normalize_checklist(items: list[ChecklistItem], max_items: int) -> list[ChecklistItem]:
+    normalized: list[ChecklistItem] = []
+    for idx, item in enumerate(items[:max_items], start=1):
+        item_id = item.item_id.strip() or f"CL-{idx:03d}"
+        area = item.area.strip()
+        check = item.check.strip()
+        expected = item.expected_result.strip()
+        if not check:
+            check = f"Проверка по требованию #{idx}"
+        if not expected:
+            expected = "Поведение соответствует требованиям"
+        normalized.append(
+            item.model_copy(
+                update={
+                    "item_id": item_id,
+                    "area": area,
+                    "check": check,
+                    "expected_result": expected,
+                }
+            )
+        )
+    return normalized
+
+
 def _model_digest_for_prompt(model: UnifiedRequirementModel, max_chars_per_source: int) -> str:
     data = model.model_dump(mode="json")
     if max_chars_per_source > 0:
@@ -98,7 +125,6 @@ def _export_template_hint(export_columns: list[TestCaseExportColumn] | None) -> 
 
 
 def _clear_executor_columns(tc: TestCase) -> TestCase:
-    """Колонки шаблона «Окружение», «Статус», «ID баг-репорта» — для ручного заполнения исполнителем."""
     return tc.model_copy(update={"environment": "", "status": "", "bug_report_id": ""})
 
 
@@ -106,17 +132,13 @@ def _analysis_digest_for_prompt(report: TestAnalysisReport, max_chars: int) -> s
     raw = json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2)
     if max_chars <= 0 or len(raw) <= max_chars:
         return raw
-    return (
-        raw[:max_chars]
-        + "\n\n[TRUNCATED: test analysis JSON was shortened for the case-generation prompt.]\n"
-    )
+    return raw[:max_chars] + "\n\n[TRUNCATED: test analysis JSON was shortened for the generation prompt.]\n"
 
 
 def fallback_test_analysis(
     model: UnifiedRequirementModel,
     consistency_report: dict[str, Any] | None,
 ) -> TestAnalysisReport:
-    """Минимальный отчёт без LLM (ошибка анализа или пустой ввод)."""
     sources: list[str] = [r.source for r in model.requirements]
     if model.design:
         sources.append(f"figma:{model.design.file_key}")
@@ -141,7 +163,7 @@ def fallback_test_analysis(
             AnalysisTechnique(
                 id="TECH-FB",
                 name="Резервный режим",
-                rationale="Полный тест-анализ недоступен; кейсы строить по unified model.",
+                rationale="Полный тест-анализ недоступен; документацию строить по unified model.",
             )
         ],
         test_conditions=[],
@@ -158,19 +180,13 @@ def generate_test_analysis(
     system = (
         "You are a senior QA analyst. Reply with a single JSON object only — no markdown fences, no extra text. "
         "Top-level key must be \"test_analysis\" (object). "
-        "All human-readable string values inside test_analysis MUST be in Russian (scope, assumptions, lists of "
-        "strings, technique names and rationales, condition descriptions, requirement_ref). "
+        "All human-readable string values inside test_analysis MUST be in Russian. "
         "IDs (technique id, condition id, technique_id references) use Latin: TECH-01, COND-01, etc. "
-        "Do NOT invent UI fields, validation rules, or addresses that are not present in the unified model or "
-        "consistency findings. If documentation is thin, state gaps in risks_and_gaps and keep inventory minimal. "
-        "You MUST apply several test-design techniques where relevant, for example: "
-        "equivalence partitioning, boundary value analysis, decision table, pairwise combinations, state/transition "
-        "for modes, negative cases. List each applied technique under \"techniques\" with id, name, rationale. "
-        "Under \"test_conditions\" list concrete check conditions with unique COND-xx ids; "
-        "each condition must be ONE atomic verification (one field, one rule, or one boundary value — "
-        "do not bundle several unrelated checks into a single COND). Each linked to a technique_id and "
-        "requirement_ref (quote or section hint from sources). "
-        "Use consistency findings to populate risks_and_gaps (ambiguity, missing design coverage, contradictions)."
+        "Do NOT invent UI fields, validation rules, or addresses that are not present in the unified model or consistency findings. "
+        "If documentation is thin, state gaps in risks_and_gaps and keep inventory minimal. "
+        "Apply several test-design techniques where relevant: equivalence partitioning, boundary value analysis, decision table, pairwise, state/transition, negative cases. "
+        "List each applied technique under \"techniques\" with id, name, rationale. "
+        "Under \"test_conditions\" list concrete atomic check conditions with unique COND-xx ids."
     )
     user = (
         "Проведи тест-анализ по следующим данным. "
@@ -197,6 +213,78 @@ def _consistency_digest_for_prompt(consistency_report: dict[str, Any] | None, ma
     return json.dumps(slim, ensure_ascii=False, indent=2)
 
 
+def _focus_instruction(focus: str) -> str:
+    hints = {
+        "smoke": "Фокус: smoke. Покрой только критический happy path и базовую доступность основных функций.",
+        "regression": "Фокус: regression. Покрой основные устойчивые сценарии, которые важно повторять перед релизом.",
+        "negative": "Фокус: negative. Делай упор на ошибки, невалидные данные, пустые поля и отказные сценарии.",
+        "api": "Фокус: API. Проверяй контракты, статусы ответов, обязательные параметры и обработку ошибок API.",
+        "ui": "Фокус: UI. Проверяй отображение, состояния элементов, тексты, навигацию и UX-серые зоны.",
+        "mobile": "Фокус: mobile. Учитывай мобильные экраны, адаптивность, touch-сценарии и платформенные различия.",
+        "security": "Фокус: security. Проверяй доступы, приватность данных, некорректные права и безопасную обработку ввода.",
+        "performance": "Фокус: performance. Проверяй скорость, задержки, тяжёлые сценарии и деградацию под нагрузкой.",
+        "accessibility": "Фокус: accessibility. Проверяй клавиатурную навигацию, labels, контрастность и screen reader сценарии.",
+    }
+    return hints.get(focus, "Фокус: general. Покрой требования сбалансированно.")
+
+
+_BAD_QA_PHRASES = (
+    "Запрещённые общие формулировки: «проверить корректность», «работает корректно», "
+    "«работает правильно», «система работает», «данные обрабатываются корректно», "
+    "«отображается корректно», «проверить функциональность», «всё работает», "
+    "«ошибка отображается» без причины/места/условия, «проверить UI» без конкретного элемента."
+)
+
+
+def generate_checklist(
+    llm: LlmClient,
+    model: UnifiedRequirementModel,
+    consistency_report: dict[str, Any] | None = None,
+    max_items: int = 30,
+    *,
+    llm_cfg: LlmConfig,
+    analysis: TestAnalysisReport | None = None,
+    focus: str = "general",
+) -> list[ChecklistItem]:
+    system = (
+        "You are a senior QA engineer. Reply with a single JSON object only. "
+        "Top-level key must be \"checklist\" (array). "
+        "Each checklist item must use keys: item_id, area, check, expected_result, priority, note, source_refs. "
+        "All human-readable fields must be in Russian. "
+        "Checklist is concise: each item is one check line, not a detailed step-by-step test case. "
+        "Keep items professional, executable, atomic, and grounded only in provided requirements and analysis. "
+        "Each checklist item is exactly one concrete check with one observable expected_result and source_refs. "
+        "Never use vague QA filler phrases."
+    )
+    user_parts = [
+        f"Сгенерируй ровно {max_items} пунктов чек-листа (не меньше и не больше).",
+        "Один пункт = одна конкретная проверка одного элемента/правила/состояния. Не превращай чек-лист в пошаговый тест-кейс.",
+        "В check — краткая формулировка проверки для исполнителя. В expected_result — конкретный наблюдаемый итог этой проверки.",
+        "Расставь priority по важности: low / medium / high / critical.",
+        "Каждый item должен иметь source_refs. Если данных не хватает, укажи gap/risk в note, не придумывай правило.",
+        "Expected_result должен описывать наблюдаемый результат: кнопка активна/неактивна, сообщение отображается, поле подсвечено, пользователь остаётся на странице или перенаправляется.",
+        "Пример хорошего item: check=\"Проверить, что кнопка 'Войти' неактивна при пустом обязательном поле Email\"; expected_result=\"Кнопка 'Войти' остаётся неактивной, пока обязательное поле Email пустое\".",
+        "Плохой item: «Проверить корректность авторизации».",
+        _BAD_QA_PHRASES,
+    ]
+    if focus != "general":
+        user_parts.append(_focus_instruction(focus))
+    if analysis is not None:
+        user_parts.append("Тест-анализ (JSON):\n" + _analysis_digest_for_prompt(analysis, llm_cfg.max_analysis_json_chars))
+        if analysis.test_conditions:
+            user_parts.append(
+                "Опирайся на test_conditions. В source_refs указывай COND-xx и источник требований там, где это уместно."
+            )
+    else:
+        user_parts.append("Если тест-анализ отсутствует, выведи пункты из unified model и consistency report.")
+    user_parts.append(
+        "Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)
+    )
+    user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
+    payload = llm.complete_json(system, "\n".join(user_parts), ChecklistList, root_list_key="checklist")
+    return _normalize_checklist(payload.checklist, max_items)
+
+
 def generate_test_cases(
     llm: LlmClient,
     model: UnifiedRequirementModel,
@@ -206,6 +294,7 @@ def generate_test_cases(
     llm_cfg: LlmConfig,
     export_columns: list[TestCaseExportColumn] | None = None,
     analysis: TestAnalysisReport | None = None,
+    focus: str = "general",
 ) -> list[TestCase]:
     class Payload(BaseModel):
         test_cases: list[TestCase]
@@ -214,71 +303,54 @@ def generate_test_cases(
         "You are a senior QA engineer. "
         "You MUST respond with a single JSON object only — no markdown fences, no text before or after. "
         "The JSON must have exactly one top-level key: \"test_cases\" (array of objects). "
-        "Do not include bug reports or any keys other than test_cases. "
-        "Each object uses keys: case_id, title, preconditions, steps (array of strings), expected_result, "
-        "environment, status, bug_report_id, note, source_refs (array of strings). "
-        "LANGUAGE: All human-readable fields MUST be in Russian: title, preconditions, every step string, "
-        "expected_result, note. Use Russian UI strings from requirements (кнопки, подписи полей, тексты ошибок). "
-        "Only case_id may stay Latin like TC-001 or T1. "
-        "CRITICAL: environment, status, and bug_report_id MUST each be the empty string \"\" — "
-        "these columns are filled by the human executor later; do not put URLs or draft/passed there. "
-        "Put the stand URL in preconditions if needed (e.g. «Открыть сервис … [URL]»). "
-        "steps: each array item is exactly one action, in execution order; do NOT prefix with \"1.\" or \"2.\" — "
-        "numbering is added when exporting to CSV/Excel. "
-        "Steps must be concrete and executable (имена полей, значения, ожидаемые сообщения на русском). "
-        "ATOMICITY (обязательно): один тест-кейс = одна проверка / одно ожидаемое поведение. "
-        "Не объединяй в одном кейсе несколько граничных значений, разных полей или разных сообщений об ошибке — "
-        "разносите на отдельные case_id. В expected_result — ровно один согласованный итог для этого кейса. "
-        "Обычно 2–5 шагов: довести систему до точки проверки и зафиксировать результат."
+        "Each object uses keys: case_id, title, preconditions, steps, expected_result, environment, status, bug_report_id, note, source_refs. "
+        "All human-readable fields MUST be in Russian. "
+        "environment, status, and bug_report_id MUST be empty strings. "
+        "Steps must be concrete, executable, and atomic. One test case = one verification. "
+        "Every test case must be understandable for manual execution and suitable for future automation. "
+        "Do not invent business rules that are absent from requirements, site model, analysis, or consistency findings."
     )
     if analysis is not None and analysis.test_conditions:
         system += (
-            " A test analysis with test_conditions (COND-xx) was provided. Each test case MUST reference exactly one "
-            "primary condition in source_refs (the main COND-xx this case verifies) AND start the note field with "
-            "\"Условия: COND-xx\" for that id. Prefer 1:1 mapping: one atomic case per condition when max_cases allows; "
-            "cover diverse techniques from the analysis without merging multiple COND into one test case."
+            " Each test case MUST reference exactly one primary condition in source_refs and start note with \"Условия: COND-xx\"."
         )
 
     user_parts = [
         f"Сгенерируй ровно {max_cases} различных тест-кейсов (не меньше и не больше).",
-        "Каждый кейс проверяет ровно одну вещь (одно значение, одно правило, одно сообщение) — не склеивай проверки.",
+        "Строгий QA-standard: каждый кейс проверяет ровно одну конкретную вещь (одно значение, одно правило, одно сообщение, одно состояние) — не склеивай проверки.",
+        "Название должно содержать конкретный объект проверки, не «Проверка формы» и не «Проверка функциональности».",
+        "Предусловия должны быть конкретными: где находится пользователь, какое состояние/данные уже подготовлены.",
+        "Шаги должны быть конкретными и исполнимыми. Если есть ввод, укажи конкретные тестовые данные.",
+        "Expected_result должен быть наблюдаемым: кнопка активна/неактивна, сообщение отображается, пользователь остаётся на странице, пользователь перенаправляется, поле подсвечивается, значение сохраняется, API-запрос завершается конкретным статусом, если API описан.",
+        "Если точный текст ошибки неизвестен, пиши: «отображается сообщение об ошибке о причине невалидного значения», не выдумывай точную строку.",
+        "Для negative cases указывай конкретное невалидное значение. Для boundary cases указывай конкретную границу только если она есть в требованиях.",
+        "Если данных не хватает — добавляй gap/risk в note, а не придумывай правило.",
+        "Каждый кейс должен иметь source_refs. Для Site Discovery case в note укажи, что кейс основан на фактически найденном UI, а не на продуктовых требованиях.",
+        _BAD_QA_PHRASES,
         "Все формулировки для исполнителя — на русском языке.",
-        "Поля environment, status и bug_report_id оставь пустыми строками \"\" (шаблон под ручное заполнение).",
+        "Поля environment, status и bug_report_id оставь пустыми строками \"\".",
         "URL стенда при необходимости укажи в предусловиях, не в environment.",
     ]
+    if focus != "general":
+        user_parts.append(_focus_instruction(focus))
     if analysis is not None:
-        user_parts.append(
-            "Тест-анализ (JSON):\n"
-            + _analysis_digest_for_prompt(analysis, llm_cfg.max_analysis_json_chars)
-        )
+        user_parts.append("Тест-анализ (JSON):\n" + _analysis_digest_for_prompt(analysis, llm_cfg.max_analysis_json_chars))
         if analysis.test_conditions:
             user_parts.append(
-                "Опирайся на тест-анализ: каждый кейс проверяет хотя бы одно условие из test_conditions; "
-                "в source_refs укажи COND-xx и при необходимости путь к файлу требований."
+                "Опирайся на тест-анализ: каждый кейс проверяет хотя бы одно условие из test_conditions; в source_refs укажи COND-xx и источник."
             )
         else:
             user_parts.append(
-                "В анализе нет списка test_conditions — сформируй кейсы по inventory, рискам и unified model; "
-                "в source_refs укажи пути к источникам."
+                "В анализе нет списка test_conditions — сформируй кейсы по inventory, рискам и unified model; в source_refs укажи пути к источникам."
             )
     else:
-        user_parts.append(
-            "Покрывай валидацию, основные сценарии и граничные случаи по возможности по unified model."
-        )
-        user_parts.append(
-            "source_refs: пути к источникам или намёк на раздел из unified model."
-        )
+        user_parts.append("Покрывай валидацию, основные сценарии и граничные случаи по unified model.")
+        user_parts.append("source_refs: пути к источникам или намёк на раздел из unified model.")
 
     user_parts.append(_export_template_hint(export_columns))
-    user_parts.append(
-        "Consistency (subset):\n"
-        + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)
-    )
-    user_parts.append(
-        "Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source)
-    )
-    user = "\n".join(user_parts)
-    payload = llm.complete_json(system, user, Payload, root_list_key="test_cases")
+    user_parts.append("Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings))
+    user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
+    payload = llm.complete_json(system, "\n".join(user_parts), Payload, root_list_key="test_cases")
     return [_clear_executor_columns(tc) for tc in payload.test_cases[:max_cases]]
 
 
@@ -293,7 +365,7 @@ def generate_bug_report_templates(
     system = (
         "You are QA lead. Reply with a single JSON object only — no markdown. "
         "Top-level key must be \"bug_reports\" (array). "
-        "All narrative fields (title, preconditions, steps, actual_result, expected_result) MUST be in Russian."
+        "All narrative fields MUST be in Russian."
     )
     user = (
         f"Сгенерируй до {max_items} правдоподобных черновиков баг-репортов по этим тест-кейсам. "
@@ -302,6 +374,39 @@ def generate_bug_report_templates(
     )
     payload = llm.complete_json(system, user, Payload, root_list_key="bug_reports")
     return _normalize_bug_reports(payload.bug_reports, max_items)
+
+
+def fallback_checklist(model: UnifiedRequirementModel, max_items: int = 30) -> list[ChecklistItem]:
+    items: list[ChecklistItem] = []
+    cap = max(1, min(max_items, 50))
+    for idx, req in enumerate(model.requirements[:cap], start=1):
+        refs = [req.source]
+        if model.design:
+            refs.append(f"figma:{model.design.file_key}")
+        items.append(
+            ChecklistItem(
+                item_id=f"CL-{idx:03d}",
+                area="Требования",
+                check=f"Проверить реализацию требований из источника {req.source}",
+                expected_result="Поведение соответствует описанным требованиям",
+                priority="medium",
+                note="Черновик без ответа LLM (резервный режим)",
+                source_refs=refs,
+            )
+        )
+    if not items:
+        items.append(
+            ChecklistItem(
+                item_id="CL-001",
+                area="Общий доступ",
+                check=f"Открыть страницу {model.target_url} и убедиться, что сервис доступен",
+                expected_result="Страница открывается без критических ошибок",
+                priority="high",
+                note="Черновик без ответа LLM (резервный режим)",
+                source_refs=[str(model.target_url)],
+            )
+        )
+    return items
 
 
 def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> list[TestCase]:

@@ -10,11 +10,12 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
-from ai_qahelper.models import BugReport, ManualExecutionResult, TestCase, TestCaseExportColumn
+from ai_qahelper.models import BugReport, ChecklistItem, ManualExecutionResult, TestCase, TestCaseExportColumn
 
 # В выгрузке таблицы эти поля всегда пустые — их заполняет исполнитель (как в шаблоне TestRail/Excel).
 _EXPORT_BLANK_EXECUTOR_FIELDS = frozenset({"environment", "status", "bug_report_id"})
 
+_CHECKLIST_EXPORT_KEYS = ["item_id", "area", "check", "expected_result", "priority", "note", "source_refs"]
 
 _STEP_LEADING_ENUM = re.compile(r"^\s*\d+[\.)]\s+")
 
@@ -74,19 +75,42 @@ def export_test_cases_local(
     base_dir: Path,
     test_cases: list[TestCase],
     columns: list[TestCaseExportColumn] | None = None,
+    filename_prefix: str = "test-cases",
 ) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = base_dir / "test-cases.csv"
-    xlsx_path = base_dir / "test-cases.xlsx"
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
     cols = columns if columns else default_test_case_export_columns()
     headers = [c.header for c in cols]
     rows_xlsx = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
-    rows_csv = [
-        {h: flatten_cell_for_csv(row[h]) for h in headers}
-        for row in rows_xlsx
-    ]
+    rows_csv = [{h: flatten_cell_for_csv(row[h]) for h in headers} for row in rows_xlsx]
     _write_csv(csv_path, rows_csv, fieldnames=headers, excel_csv_sep_hint=True)
     pd.DataFrame(rows_xlsx, columns=headers).to_excel(xlsx_path, index=False)
+    return csv_path, xlsx_path
+
+
+def export_checklist_local(
+    base_dir: Path,
+    checklist_items: list[ChecklistItem],
+    filename_prefix: str = "checklist",
+) -> tuple[Path, Path]:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
+    rows = [
+        {
+            "item_id": item.item_id,
+            "area": item.area,
+            "check": item.check,
+            "expected_result": item.expected_result,
+            "priority": item.priority,
+            "note": item.note,
+            "source_refs": "; ".join(item.source_refs),
+        }
+        for item in checklist_items
+    ]
+    _write_csv(csv_path, rows, fieldnames=_CHECKLIST_EXPORT_KEYS, excel_csv_sep_hint=True)
+    pd.DataFrame(rows, columns=_CHECKLIST_EXPORT_KEYS).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 
@@ -104,10 +128,14 @@ _BUG_EXPORT_KEYS = [
 ]
 
 
-def export_bug_reports_local(base_dir: Path, bug_reports: list[BugReport]) -> tuple[Path, Path]:
+def export_bug_reports_local(
+    base_dir: Path,
+    bug_reports: list[BugReport],
+    filename_prefix: str = "bug-reports",
+) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = base_dir / "bug-reports.csv"
-    xlsx_path = base_dir / "bug-reports.xlsx"
+    csv_path = base_dir / f"{filename_prefix}.csv"
+    xlsx_path = base_dir / f"{filename_prefix}.xlsx"
     rows = [
         {
             "bug_id": b.bug_id,
@@ -153,8 +181,6 @@ def _write_csv(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = fieldnames if fieldnames is not None else (list(rows[0].keys()) if rows else [])
-    # utf-8-sig: Excel на Windows корректно открывает кириллицу; QUOTE_MINIMAL — кавычки при запятых/кавычках в поле.
-    # Первая строка sep=, подсказывает Excel (в т.ч. русская локаль) разделитель «запятая».
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         if excel_csv_sep_hint:
             f.write("sep=,\n")

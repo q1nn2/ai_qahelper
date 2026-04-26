@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-qahelper"
 version = "0.1.0"
-description = "Локальный CLI для генерации тест-кейсов из требований и макетов (OpenAI, опционально Figma API)."
+description = "Локальный CLI для QA: требования и макеты → тестовая документация и базовые артефакты для ручного и авто-прогона."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -15,22 +15,40 @@ dependencies = [
     "rich>=13",
     "pydantic>=2",
     "httpx>=0.27",
+    "beautifulsoup4>=4.12",
     "openai>=1.40",
     "pypdf>=4",
     "pymupdf>=1.24",
+    "python-docx>=1.1",
     "pyyaml>=6",
     "pandas>=2",
     "openpyxl>=3",
     "gspread>=6",
     "google-auth>=2",
     "python-dotenv>=1.0",
+    "streamlit>=1.35",
 ]
 
 [project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8"]
 autotest = ["pytest>=8", "pytest-html>=4", "playwright>=1.40"]
 
 [project.scripts]
 ai-qahelper = "ai_qahelper.cli:run_cli"
+ai-qahelper-chat = "ai_qahelper.chat_launcher:run_chat"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
