@@ -8,6 +8,7 @@ from ai_qahelper.reporting import (
     flatten_cell_for_csv,
     format_steps_for_export,
 )
+from ai_qahelper.template_service import default_template
 
 
 def test_format_steps_for_export_numbers_and_strips_enum() -> None:
@@ -36,3 +37,26 @@ def test_export_csv_single_physical_row_per_case(tmp_path: Path) -> None:
     lines = csv_path.read_text(encoding="utf-8-sig").splitlines()
     assert lines[0].startswith("sep=,")
     assert len(lines) == 3
+
+
+def test_export_uses_template_labels_and_skips_disabled_columns(tmp_path: Path) -> None:
+    tc = aq_models.TestCase(
+        case_id="TC-001",
+        title="T",
+        preconditions="P",
+        steps=["One", "Two"],
+        expected_result="E",
+        note="N",
+    )
+    template = default_template("test_cases")
+    template.columns = [
+        column.model_copy(update={"enabled": column.required or column.key == "priority"})
+        for column in template.columns
+    ]
+
+    csv_path, _ = export_test_cases_local(tmp_path, [tc], template=template)
+    text = csv_path.read_text(encoding="utf-8-sig")
+
+    assert "Название тест-кейса" in text
+    assert "Приоритет" in text
+    assert "Предусловия" not in text

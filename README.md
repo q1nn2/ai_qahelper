@@ -2,9 +2,17 @@
 
 ## Самый простой запуск
 
-Windows:
+Windows PowerShell:
 
 ```bash
+git clone https://github.com/q1nn2/ai_qahelper.git
+cd ai_qahelper
+.\run_chat_windows.bat
+```
+
+Windows cmd:
+
+```bat
 git clone https://github.com/q1nn2/ai_qahelper.git
 cd ai_qahelper
 run_chat_windows.bat
@@ -19,15 +27,27 @@ chmod +x run_chat.sh
 ./run_chat.sh
 ```
 
-Launcher сам создаст `.venv`, установит зависимости, создаст `ai-tester.config.yaml`, спросит `OPENAI_API_KEY`, сохранит его в локальный `.env` и откроет chat mode в браузере.
+Launcher сам создаст `.venv`, установит зависимости, создаст `ai-tester.config.yaml`, предложит ввести `OPENAI_API_KEY` и откроет chat mode в браузере.
 
-Если ключ не задан или вместо него осталась заглушка, UI покажет блок настройки AI и позволит вставить ключ прямо в браузере.
+Если нажать Enter и не вводить ключ в терминале, приложение всё равно откроется. UI покажет блок настройки AI и позволит вставить ключ прямо в браузере.
+
+Если нужно принудительно переустановить зависимости:
+
+```powershell
+.\run_chat_windows.bat --reinstall
+```
+
+macOS/Linux:
+
+```bash
+./run_chat.sh --reinstall
+```
 
 ## Как добавить OPENAI_API_KEY
 
 Рекомендуемый способ для новичка — через браузер:
 
-1. Запустите `run_chat_windows.bat` или `run_chat.sh`.
+1. Запустите `.\run_chat_windows.bat` в PowerShell, `run_chat_windows.bat` в cmd или `./run_chat.sh` на macOS/Linux.
 2. Откройте UI.
 3. Вставьте ключ в поле `OPENAI_API_KEY`.
 4. Включите `Сохранить ключ в локальный .env`, если не хотите вводить ключ при каждом запуске.
@@ -76,6 +96,18 @@ AI QAHelper — локальный AI QA ассистент, который по
 - XLSX/CSV/JSON exports.
 - Optional Playwright/pytest starter tests.
 - Optional Google Sheets sync.
+
+## Стоимость и LLM-вызовы
+
+Многостраничный UI разделяет локальную работу с артефактами и AI-действия. Вкладки `Dashboard`, `Test Cases`, `Checklist`, `Quality`, `Review`, `Export` и `Settings` открываются локально: просмотр JSON, фильтрация, редактирование таблиц, сохранение `*.edited.json`, утверждение `*.final.json`, экспорт XLSX и локальная проверка качества не вызывают LLM и не расходуют токены.
+
+LLM вызывается только после явного действия пользователя: кнопок с пометкой `через AI` или отправки сообщения во вкладке `Generate`. Локальная проверка качества бесплатная; `Глубокий AI-анализ качества`, поиск серых зон и AI-улучшения используют LLM и могут увеличить стоимость.
+
+## Настраиваемые шаблоны документации
+
+QAHelper использует базовый шаблон колонок для test cases, checklist и bug reports, но его можно настроить без ручного YAML. Во вкладке `Settings` → `Templates` выберите тип документации и отметьте нужные колонки галочками. Обязательные колонки всегда включены и не отключаются: для test cases это `ID`, `Название тест-кейса`, `Описание шагов`, `Ожидаемый результат`; для checklist — `ID`, `Проверка`, `Ожидаемый результат`; для bug reports — `ID`, `Название БР`, `Шаги воспроизведения`, `Ожидаемый результат`, `Фактический результат`.
+
+Шаблон сохраняется в `templates/user_templates/<artifact_type>_template.json`, а для активной сессии может быть сохранён в `runs/<session_id>/template_settings.json`. Приоритет такой: шаблон сессии, пользовательский шаблон, затем базовый QAHelper template. Выбранный шаблон влияет на prompt генерации, порядок и названия колонок в XLSX/CSV export, отображение таблиц в UI и Quality Gate: обязательные поля активного шаблона проверяются строго, а отключённые optional-поля не блокируют качество.
 
 ## Быстрый старт
 
