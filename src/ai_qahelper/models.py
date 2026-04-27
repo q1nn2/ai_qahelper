@@ -188,7 +188,7 @@ class ChecklistItem(BaseModel):
 class TestCase(BaseModel):
     case_id: str
     title: str
-    preconditions: str
+    preconditions: str = ""
     steps: list[str]
     expected_result: str
     # Пустые по умолчанию: колонки «Окружение», «Статус», «ID баг-репорта» заполняет исполнитель позже.

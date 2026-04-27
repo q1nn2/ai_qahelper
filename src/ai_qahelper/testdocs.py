@@ -17,6 +17,7 @@ from ai_qahelper.models import (
     UnifiedRequirementModel,
 )
 from ai_qahelper.reporting import default_test_case_export_columns
+from ai_qahelper.template_service import DocumentationTemplate, build_template_prompt_hint
 
 
 class TestCaseList(BaseModel):
@@ -113,7 +114,12 @@ def _model_digest_for_prompt(model: UnifiedRequirementModel, max_chars_per_sourc
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _export_template_hint(export_columns: list[TestCaseExportColumn] | None) -> str:
+def _export_template_hint(
+    export_columns: list[TestCaseExportColumn] | None,
+    template: DocumentationTemplate | None = None,
+) -> str:
+    if template is not None:
+        return build_template_prompt_hint(template)
     cols = export_columns if export_columns else default_test_case_export_columns()
     mapping = "; ".join(f"{c.field} → колонка «{c.header}»" for c in cols)
     return (
@@ -245,11 +251,17 @@ def generate_checklist(
     llm_cfg: LlmConfig,
     analysis: TestAnalysisReport | None = None,
     focus: str = "general",
+    template: DocumentationTemplate | None = None,
 ) -> list[ChecklistItem]:
+    template_keys = (
+        ", ".join(column.key for column in template.columns if column.enabled or column.required)
+        if template is not None
+        else "item_id, area, check, expected_result, priority, note, source_refs"
+    )
     system = (
         "You are a senior QA engineer. Reply with a single JSON object only. "
         "Top-level key must be \"checklist\" (array). "
-        "Each checklist item must use keys: item_id, area, check, expected_result, priority, note, source_refs. "
+        f"Each checklist item must use keys: {template_keys}. "
         "All human-readable fields must be in Russian. "
         "Checklist is concise: each item is one check line, not a detailed step-by-step test case. "
         "Keep items professional, executable, atomic, and grounded only in provided requirements and analysis. "
@@ -267,6 +279,8 @@ def generate_checklist(
         "Плохой item: «Проверить корректность авторизации».",
         _BAD_QA_PHRASES,
     ]
+    if template is not None:
+        user_parts.append(build_template_prompt_hint(template))
     if focus != "general":
         user_parts.append(_focus_instruction(focus))
     if analysis is not None:
@@ -295,15 +309,21 @@ def generate_test_cases(
     export_columns: list[TestCaseExportColumn] | None = None,
     analysis: TestAnalysisReport | None = None,
     focus: str = "general",
+    template: DocumentationTemplate | None = None,
 ) -> list[TestCase]:
     class Payload(BaseModel):
         test_cases: list[TestCase]
 
+    template_keys = (
+        ", ".join(column.key for column in template.columns if column.enabled or column.required)
+        if template is not None
+        else "case_id, title, preconditions, steps, expected_result, environment, status, bug_report_id, note, source_refs"
+    )
     system = (
         "You are a senior QA engineer. "
         "You MUST respond with a single JSON object only — no markdown fences, no text before or after. "
         "The JSON must have exactly one top-level key: \"test_cases\" (array of objects). "
-        "Each object uses keys: case_id, title, preconditions, steps, expected_result, environment, status, bug_report_id, note, source_refs. "
+        f"Each object uses keys: {template_keys}. "
         "All human-readable fields MUST be in Russian. "
         "environment, status, and bug_report_id MUST be empty strings. "
         "Steps must be concrete, executable, and atomic. One test case = one verification. "
@@ -347,7 +367,7 @@ def generate_test_cases(
         user_parts.append("Покрывай валидацию, основные сценарии и граничные случаи по unified model.")
         user_parts.append("source_refs: пути к источникам или намёк на раздел из unified model.")
 
-    user_parts.append(_export_template_hint(export_columns))
+    user_parts.append(_export_template_hint(export_columns, template))
     user_parts.append("Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings))
     user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
     payload = llm.complete_json(system, "\n".join(user_parts), Payload, root_list_key="test_cases")
@@ -358,6 +378,7 @@ def generate_bug_report_templates(
     llm: LlmClient,
     test_cases: list[TestCase],
     max_items: int = 20,
+    template: DocumentationTemplate | None = None,
 ) -> list[BugReport]:
     class Payload(BaseModel):
         bug_reports: list[dict[str, Any]]
@@ -367,11 +388,14 @@ def generate_bug_report_templates(
         "Top-level key must be \"bug_reports\" (array). "
         "All narrative fields MUST be in Russian."
     )
-    user = (
-        f"Сгенерируй до {max_items} правдоподобных черновиков баг-репортов по этим тест-кейсам. "
-        "Не придумывай невозможные сценарии. Всё на русском.\n"
-        f"{json.dumps([c.model_dump() for c in test_cases], ensure_ascii=False)}"
-    )
+    user_parts = [
+        f"Сгенерируй до {max_items} правдоподобных черновиков баг-репортов по этим тест-кейсам.",
+        "Не придумывай невозможные сценарии. Всё на русском.",
+    ]
+    if template is not None:
+        user_parts.append(build_template_prompt_hint(template))
+    user_parts.append(json.dumps([c.model_dump() for c in test_cases], ensure_ascii=False))
+    user = "\n".join(user_parts)
     payload = llm.complete_json(system, user, Payload, root_list_key="bug_reports")
     return _normalize_bug_reports(payload.bug_reports, max_items)
 

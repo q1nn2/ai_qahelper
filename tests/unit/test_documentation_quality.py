@@ -7,6 +7,7 @@ from ai_qahelper.documentation_quality import (
     evaluate_test_cases,
 )
 from ai_qahelper.models import ChecklistItem, TestCase
+from ai_qahelper.template_service import default_template
 
 
 def _case(
@@ -131,3 +132,24 @@ def test_apply_quality_marks_to_checklist_adds_note() -> None:
 
     assert "Quality:" in marked[0].note
     assert "vague_check" in marked[0].note
+
+
+def test_quality_gate_flags_empty_required_template_field() -> None:
+    template = default_template("test_cases")
+    report = evaluate_test_cases([_case(title="")], template=template)
+
+    assert "missing_required_field" in report["items"][0]["issues"]
+
+
+def test_quality_gate_ignores_disabled_optional_template_field() -> None:
+    template = default_template("test_cases")
+    template.columns = [
+        column.model_copy(update={"enabled": column.required})
+        for column in template.columns
+    ]
+    case = _case(preconditions="", source_refs=[])
+
+    report = evaluate_test_cases([case], template=template)
+
+    assert "missing_required_field" not in report["items"][0]["issues"]
+    assert "missing_source_refs" not in report["items"][0]["issues"]

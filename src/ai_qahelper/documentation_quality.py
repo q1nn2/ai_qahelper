@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from ai_qahelper.models import ChecklistItem, TestCase
+from ai_qahelper.template_service import DocumentationTemplate, required_columns, template_record_value
 
 _SPACE_RE = re.compile(r"\s+")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-z]{2,}", re.IGNORECASE)
@@ -109,10 +110,10 @@ _PENALTIES = {
 }
 
 
-def evaluate_test_cases(test_cases: list[TestCase]) -> dict[str, Any]:
+def evaluate_test_cases(test_cases: list[TestCase], template: DocumentationTemplate | None = None) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for test_case in test_cases:
-        issues = _test_case_issues(test_case)
+        issues = _test_case_issues(test_case, template)
         score = _score(issues)
         items.append(
             {
@@ -137,10 +138,13 @@ def apply_quality_marks_to_test_cases(test_cases: list[TestCase], quality_report
     return marked
 
 
-def evaluate_checklist_items(checklist: list[ChecklistItem]) -> dict[str, Any]:
+def evaluate_checklist_items(
+    checklist: list[ChecklistItem],
+    template: DocumentationTemplate | None = None,
+) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for item in checklist:
-        issues = _checklist_issues(item)
+        issues = _checklist_issues(item, template)
         score = _score(issues)
         items.append(
             {
@@ -165,7 +169,7 @@ def apply_quality_marks_to_checklist(checklist: list[ChecklistItem], quality_rep
     return marked
 
 
-def _test_case_issues(test_case: TestCase) -> list[str]:
+def _test_case_issues(test_case: TestCase, template: DocumentationTemplate | None = None) -> list[str]:
     issues: list[str] = []
     title = _norm(test_case.title)
     preconditions = _norm(test_case.preconditions)
@@ -173,8 +177,10 @@ def _test_case_issues(test_case: TestCase) -> list[str]:
     steps = [_norm(step) for step in test_case.steps if _norm(step)]
     joined = " ".join([title, preconditions, expected, " ".join(steps)])
 
-    if not title or not preconditions or not steps or not expected:
+    if _has_missing_required_fields(test_case, template) or (template is None and (not title or not preconditions or not steps or not expected)):
         issues.append("required_fields")
+    if _has_missing_required_fields(test_case, template):
+        issues.append("missing_required_field")
     if _is_vague_title(title):
         issues.append("vague_title")
     if _is_vague_expected(expected):
@@ -185,7 +191,7 @@ def _test_case_issues(test_case: TestCase) -> list[str]:
         issues.append("multiple_checks")
     if _missing_test_data(joined):
         issues.append("missing_test_data")
-    if not test_case.source_refs:
+    if _should_check_column(template, "source_refs") and not test_case.source_refs:
         issues.append("missing_source_refs")
     if _possible_invented_requirement(joined, test_case.source_refs, test_case.note):
         issues.append("possible_invented_requirement")
@@ -194,20 +200,22 @@ def _test_case_issues(test_case: TestCase) -> list[str]:
     return issues
 
 
-def _checklist_issues(item: ChecklistItem) -> list[str]:
+def _checklist_issues(item: ChecklistItem, template: DocumentationTemplate | None = None) -> list[str]:
     issues: list[str] = []
     check = _norm(item.check)
     expected = _norm(item.expected_result)
     joined = f"{check} {expected}"
-    if not check or not expected:
+    if _has_missing_required_fields(item, template) or (template is None and (not check or not expected)):
         issues.append("required_fields")
+    if _has_missing_required_fields(item, template):
+        issues.append("missing_required_field")
     if _is_vague_check(check):
         issues.append("vague_check")
     if _is_vague_expected(expected):
         issues.append("vague_expected_result")
-    if not item.source_refs:
+    if _should_check_column(template, "source_refs") and not item.source_refs:
         issues.append("missing_source_refs")
-    if not item.priority:
+    if _should_check_column(template, "priority") and not item.priority:
         issues.append("missing_priority")
     if _automation_weakness(joined, [check], expected):
         issues.append("automation_weakness")
@@ -234,6 +242,27 @@ def _score(issues: list[str]) -> int:
     for issue in set(issues):
         score -= _PENALTIES.get(issue, 10)
     return max(0, score)
+
+
+def _has_missing_required_fields(record: TestCase | ChecklistItem, template: DocumentationTemplate | None) -> bool:
+    if template is None:
+        return False
+    for column in required_columns(template):
+        value = template_record_value(record, column.key)
+        if column.type == "list" and not value:
+            return True
+        if isinstance(value, list):
+            if not [item for item in value if _norm(str(item))]:
+                return True
+        elif not _norm(str(value)):
+            return True
+    return False
+
+
+def _should_check_column(template: DocumentationTemplate | None, key: str) -> bool:
+    if template is None:
+        return True
+    return any(column.key == key and (column.enabled or column.required) for column in template.columns)
 
 
 def _status(score: int) -> str:

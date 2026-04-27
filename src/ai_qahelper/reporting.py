@@ -11,6 +11,7 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 
 from ai_qahelper.models import BugReport, ChecklistItem, ManualExecutionResult, TestCase, TestCaseExportColumn
+from ai_qahelper.template_service import DocumentationTemplate, enabled_columns, template_record_value
 
 # В выгрузке таблицы эти поля всегда пустые — их заполняет исполнитель (как в шаблоне TestRail/Excel).
 _EXPORT_BLANK_EXECUTOR_FIELDS = frozenset({"environment", "status", "bug_report_id"})
@@ -61,6 +62,14 @@ def default_test_case_export_columns() -> list[TestCaseExportColumn]:
     ]
 
 
+def _format_export_value(value: object, key: str = "") -> str:
+    if isinstance(value, list):
+        if key in {"source_refs", "attachments", "attachment"}:
+            return "; ".join(str(item) for item in value)
+        return format_steps_for_export([str(item) for item in value])
+    return str(value or "")
+
+
 def _test_case_cell(test_case: TestCase, field: str) -> str:
     if field in _EXPORT_BLANK_EXECUTOR_FIELDS:
         return ""
@@ -71,18 +80,32 @@ def _test_case_cell(test_case: TestCase, field: str) -> str:
     return str(getattr(test_case, field))
 
 
+def _rows_from_template(records: list[object], template: DocumentationTemplate) -> tuple[list[str], list[dict[str, str]]]:
+    cols = enabled_columns(template)
+    headers = [column.label for column in cols]
+    rows = [
+        {column.label: _format_export_value(template_record_value(record, column.key), column.key) for column in cols}
+        for record in records
+    ]
+    return headers, rows
+
+
 def export_test_cases_local(
     base_dir: Path,
     test_cases: list[TestCase],
     columns: list[TestCaseExportColumn] | None = None,
     filename_prefix: str = "test-cases",
+    template: DocumentationTemplate | None = None,
 ) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
     csv_path = base_dir / f"{filename_prefix}.csv"
     xlsx_path = base_dir / f"{filename_prefix}.xlsx"
-    cols = columns if columns else default_test_case_export_columns()
-    headers = [c.header for c in cols]
-    rows_xlsx = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
+    if template is not None:
+        headers, rows_xlsx = _rows_from_template(test_cases, template)
+    else:
+        cols = columns if columns else default_test_case_export_columns()
+        headers = [c.header for c in cols]
+        rows_xlsx = [{col.header: _test_case_cell(c, col.field) for col in cols} for c in test_cases]
     rows_csv = [{h: flatten_cell_for_csv(row[h]) for h in headers} for row in rows_xlsx]
     _write_csv(csv_path, rows_csv, fieldnames=headers, excel_csv_sep_hint=True)
     pd.DataFrame(rows_xlsx, columns=headers).to_excel(xlsx_path, index=False)
@@ -93,24 +116,29 @@ def export_checklist_local(
     base_dir: Path,
     checklist_items: list[ChecklistItem],
     filename_prefix: str = "checklist",
+    template: DocumentationTemplate | None = None,
 ) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
     csv_path = base_dir / f"{filename_prefix}.csv"
     xlsx_path = base_dir / f"{filename_prefix}.xlsx"
-    rows = [
-        {
-            "item_id": item.item_id,
-            "area": item.area,
-            "check": item.check,
-            "expected_result": item.expected_result,
-            "priority": item.priority,
-            "note": item.note,
-            "source_refs": "; ".join(item.source_refs),
-        }
-        for item in checklist_items
-    ]
-    _write_csv(csv_path, rows, fieldnames=_CHECKLIST_EXPORT_KEYS, excel_csv_sep_hint=True)
-    pd.DataFrame(rows, columns=_CHECKLIST_EXPORT_KEYS).to_excel(xlsx_path, index=False)
+    if template is not None:
+        headers, rows = _rows_from_template(checklist_items, template)
+    else:
+        rows = [
+            {
+                "item_id": item.item_id,
+                "area": item.area,
+                "check": item.check,
+                "expected_result": item.expected_result,
+                "priority": item.priority,
+                "note": item.note,
+                "source_refs": "; ".join(item.source_refs),
+            }
+            for item in checklist_items
+        ]
+        headers = _CHECKLIST_EXPORT_KEYS
+    _write_csv(csv_path, rows, fieldnames=headers, excel_csv_sep_hint=True)
+    pd.DataFrame(rows, columns=headers).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 
@@ -132,27 +160,32 @@ def export_bug_reports_local(
     base_dir: Path,
     bug_reports: list[BugReport],
     filename_prefix: str = "bug-reports",
+    template: DocumentationTemplate | None = None,
 ) -> tuple[Path, Path]:
     base_dir.mkdir(parents=True, exist_ok=True)
     csv_path = base_dir / f"{filename_prefix}.csv"
     xlsx_path = base_dir / f"{filename_prefix}.xlsx"
-    rows = [
-        {
-            "bug_id": b.bug_id,
-            "title": b.title,
-            "severity": b.severity,
-            "priority": b.priority,
-            "preconditions": b.preconditions,
-            "steps": " | ".join(b.steps),
-            "actual_result": b.actual_result,
-            "expected_result": b.expected_result,
-            "attachments": ",".join(b.attachments),
-            "linked_test_case_id": b.linked_test_case_id or "",
-        }
-        for b in bug_reports
-    ]
-    _write_csv(csv_path, rows, fieldnames=_BUG_EXPORT_KEYS)
-    pd.DataFrame(rows, columns=_BUG_EXPORT_KEYS).to_excel(xlsx_path, index=False)
+    if template is not None:
+        headers, rows = _rows_from_template(bug_reports, template)
+    else:
+        rows = [
+            {
+                "bug_id": b.bug_id,
+                "title": b.title,
+                "severity": b.severity,
+                "priority": b.priority,
+                "preconditions": b.preconditions,
+                "steps": " | ".join(b.steps),
+                "actual_result": b.actual_result,
+                "expected_result": b.expected_result,
+                "attachments": ",".join(b.attachments),
+                "linked_test_case_id": b.linked_test_case_id or "",
+            }
+            for b in bug_reports
+        ]
+        headers = _BUG_EXPORT_KEYS
+    _write_csv(csv_path, rows, fieldnames=headers)
+    pd.DataFrame(rows, columns=headers).to_excel(xlsx_path, index=False)
     return csv_path, xlsx_path
 
 

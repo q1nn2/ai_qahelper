@@ -19,6 +19,7 @@ from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, Test
 from ai_qahelper.quality import check_consistency
 from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local, save_json
 from ai_qahelper.session_service import load_session, retry_attempts, save_session, session_path
+from ai_qahelper.template_service import load_active_template
 from ai_qahelper.testdocs import (
     fallback_checklist,
     fallback_test_analysis,
@@ -99,6 +100,9 @@ def generate_docs(
         state.test_analysis_path = str(analysis_json)
 
     bug_templates: list[BugReport] = []
+    test_cases_template = load_active_template("test_cases", session_id)
+    checklist_template = load_active_template("checklist", session_id)
+    bug_reports_template = load_active_template("bug_reports", session_id)
     if artifact_type == "checklist":
         try:
             checklist = retry_attempts(
@@ -111,6 +115,7 @@ def generate_docs(
                     analysis=analysis if run_analysis and analysis is not None else fallback_test_analysis(unified, consistency),
                     max_items=n_items,
                     focus=focus,
+                    template=checklist_template,
                 ),
             )
         except Exception as exc:
@@ -118,13 +123,13 @@ def generate_docs(
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_checklist:\n{type(exc).__name__}: {exc}\n")
             checklist = fallback_checklist(unified, max_items=n_items)
-        quality_report = evaluate_checklist_items(checklist)
+        quality_report = evaluate_checklist_items(checklist, template=checklist_template)
         checklist = apply_quality_marks_to_checklist(checklist, quality_report)
         checklist_json = sdir / _focused_name("checklist.json", focus)
         quality_json = sdir / _focused_name("checklist-quality-report.json", focus)
         save_json(checklist_json, [c.model_dump() for c in checklist])
         save_json(quality_json, quality_report)
-        export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus))
+        export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus), template=checklist_template)
         state.checklist_path = str(checklist_json)
         state.quality_report_path = str(quality_json)
         state.test_cases_path = None
@@ -143,6 +148,7 @@ def generate_docs(
                     export_columns=cfg.test_cases_export,
                     analysis=analysis if run_analysis else None,
                     focus=focus,
+                    template=test_cases_template,
                 ),
             )
         except Exception as exc:
@@ -153,11 +159,14 @@ def generate_docs(
         test_cases, dedup_report = deduplicate_test_cases(test_cases)
         dedup_json = sdir / _focused_name("dedup-report.json", focus)
         save_json(dedup_json, dedup_report)
-        quality_report = evaluate_test_cases(test_cases)
+        quality_report = evaluate_test_cases(test_cases, template=test_cases_template)
         test_cases = apply_quality_marks_to_test_cases(test_cases, quality_report)
         if do_bugs:
             try:
-                bug_templates = retry_attempts(2, lambda: generate_bug_report_templates(llm, test_cases))
+                bug_templates = retry_attempts(
+                    2,
+                    lambda: generate_bug_report_templates(llm, test_cases, template=bug_reports_template),
+                )
             except Exception as exc:
                 logger.exception("generate_bug_report_templates failed, skipping bug drafts")
                 with err_path.open("a", encoding="utf-8") as f:
@@ -170,8 +179,19 @@ def generate_docs(
         save_json(test_cases_json, [t.model_dump() for t in test_cases])
         save_json(quality_json, quality_report)
         save_json(bugs_json, [b.model_dump() for b in bug_templates])
-        export_test_cases_local(sdir, test_cases, cfg.test_cases_export, filename_prefix=_focused_prefix("test-cases", focus))
-        export_bug_reports_local(sdir, bug_templates, filename_prefix=_focused_prefix("bug-reports", focus))
+        export_test_cases_local(
+            sdir,
+            test_cases,
+            cfg.test_cases_export,
+            filename_prefix=_focused_prefix("test-cases", focus),
+            template=test_cases_template,
+        )
+        export_bug_reports_local(
+            sdir,
+            bug_templates,
+            filename_prefix=_focused_prefix("bug-reports", focus),
+            template=bug_reports_template,
+        )
 
         state.test_cases_path = str(test_cases_json)
         state.dedup_report_path = str(dedup_json)
@@ -196,13 +216,17 @@ def generate_bug_templates_for_session(session_id: str, max_items: int = 20) -> 
     sdir = session_path(session_id)
     configure_logging(sdir)
     llm = LlmClient(cfg.llm)
+    bug_reports_template = load_active_template("bug_reports", session_id)
     test_cases = [
         item
         for item in json.loads(Path(state.test_cases_path).read_text(encoding="utf-8"))
     ]
     parsed_cases = [TestCase.model_validate(item) for item in test_cases]
     try:
-        bug_templates = retry_attempts(2, lambda: generate_bug_report_templates(llm, parsed_cases, max_items=max_items))
+        bug_templates = retry_attempts(
+            2,
+            lambda: generate_bug_report_templates(llm, parsed_cases, max_items=max_items, template=bug_reports_template),
+        )
     except Exception as exc:
         logger.exception("generate_bug_report_templates failed")
         err_path = sdir / "llm-generation-errors.log"
@@ -211,7 +235,7 @@ def generate_bug_templates_for_session(session_id: str, max_items: int = 20) -> 
         bug_templates = []
     bugs_json = sdir / "bug-reports.json"
     save_json(bugs_json, [b.model_dump() for b in bug_templates])
-    export_bug_reports_local(sdir, bug_templates)
+    export_bug_reports_local(sdir, bug_templates, template=bug_reports_template)
     state.bug_reports_path = str(bugs_json)
     save_session(state)
     return state
