@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from ai_qahelper.chat_agent import ChatContext, handle_message
 from ai_qahelper.chat_app import (
     MAIN_SCREEN_CAPTION,
     MISSING_API_KEY_MESSAGE,
-    MISSING_QUICK_ACTION_API_KEY_WARNING,
-    MISSING_QUICK_ACTION_CONTEXT_WARNING,
+    MISSING_TASK_API_KEY_WARNING,
+    MISSING_TASK_CONTEXT_WARNING,
     SUPPORTED_UPLOAD_TYPES,
+    TASK_FOCUS_OPTIONS,
+    TASK_TYPES,
     _download_label,
+    _load_coverage_report_for_ui,
+    _render_task_launcher,
+    _render_workflow_cards,
+    build_task_prompt,
     clear_chat_state,
     remember_warning_once,
     run_validated_ai_action,
     should_remember_message,
-    validate_quick_action,
+    validate_task_run,
 )
 from ai_qahelper.chat_planner import ChatPlan, PlanAction
 
@@ -27,6 +34,7 @@ def test_download_labels_are_user_friendly() -> None:
     assert _download_label(Path("runs/s1/test-cases.xlsx")) == "Скачать test-cases.xlsx"
     assert _download_label(Path("runs/s1/checklist.xlsx")) == "Скачать checklist.xlsx"
     assert _download_label(Path("runs/s1/test-cases-quality-report.json")) == "Скачать quality report"
+    assert _download_label(Path("runs/s1/coverage-report.json")) == "Скачать coverage report"
     assert _download_label(Path("runs/s1/exploratory-report.md")) == "Скачать exploratory report"
     assert _download_label(Path("runs/s1/test-cases.json")) == "Скачать JSON"
 
@@ -69,6 +77,105 @@ def test_chat_app_replaces_old_api_key_setup_warning() -> None:
     assert "Добавьте строку `OPENAI_API_KEY=sk-...`" not in source
 
 
+def test_task_launcher_options_are_professional() -> None:
+    assert TASK_TYPES == (
+        "Test cases",
+        "Checklist",
+        "Quality check",
+        "Risk analysis",
+        "Bug reports draft",
+        "Autotests draft",
+    )
+    assert TASK_FOCUS_OPTIONS == (
+        "General",
+        "Smoke",
+        "Negative",
+        "Regression",
+        "Boundary",
+        "UI",
+        "API",
+        "Mobile",
+        "Accessibility",
+    )
+
+
+def test_task_launcher_is_render_only_until_run_button() -> None:
+    source = inspect.getsource(_render_workflow_cards)
+
+    assert "QA Workflow" in source
+    assert "Generate test cases" in source
+    assert "Coverage report" in source
+    assert "st.button" in source
+    assert "st.selectbox" not in source
+    assert "handle_message" not in source
+    assert "run_ai_action" not in source
+    assert "_render_task_launcher" in inspect.getsource(_render_task_launcher)
+
+
+def test_build_task_prompt_for_test_cases_general() -> None:
+    assert build_task_prompt("Test cases", "General", 30) == (
+        "Сгенерируй test cases по текущему контексту с полным покрытием требований."
+    )
+
+
+def test_build_task_prompt_for_test_cases_smoke() -> None:
+    assert build_task_prompt("Test cases", "Smoke", 10) == (
+        "Сгенерируй smoke test cases по текущему контексту с полным покрытием требований."
+    )
+
+
+def test_build_task_prompt_for_test_cases_negative() -> None:
+    assert build_task_prompt("Test cases", "Negative", 15) == (
+        "Сгенерируй negative test cases по текущему контексту с полным покрытием требований."
+    )
+
+
+def test_build_task_prompt_for_checklist() -> None:
+    assert build_task_prompt("Checklist", "General", 30) == (
+        "Сгенерируй checklist по текущему контексту с полным покрытием требований."
+    )
+
+
+def test_task_launcher_no_longer_exposes_case_count() -> None:
+    source = Path("src/ai_qahelper/chat_app.py").read_text(encoding="utf-8")
+
+    assert "Количество проверок" not in source
+    assert "Агент сам определяет объём документации" in source
+
+
+def test_coverage_report_loader_reads_latest_report(monkeypatch, tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage-report.json"
+    report_path.write_text('{"summary": {"requirements_total": 1}}', encoding="utf-8")
+    monkeypatch.setattr(
+        "ai_qahelper.chat_app.list_export_files",
+        lambda session_id: [{"name": report_path.name, "path": str(report_path)}],
+    )
+
+    report = _load_coverage_report_for_ui("s1")
+
+    assert report == {"summary": {"requirements_total": 1}}
+
+
+def test_build_task_prompt_for_quality_check() -> None:
+    assert build_task_prompt("Quality check", "General", 30) == "Проверь качество текущей тестовой документации."
+
+
+def test_build_task_prompt_for_risk_analysis() -> None:
+    assert build_task_prompt("Risk analysis", "General", 30) == "Найди риски, противоречия и серые зоны в требованиях."
+
+
+def test_build_task_prompt_for_bug_reports_draft() -> None:
+    assert build_task_prompt("Bug reports draft", "General", 30) == (
+        "Создай черновики bug reports по текущей сессии и найденным проблемам."
+    )
+
+
+def test_build_task_prompt_for_autotests_draft() -> None:
+    assert build_task_prompt("Autotests draft", "General", 30) == (
+        "Подготовь Playwright/pytest автотесты по текущей сессии, но не запускай их."
+    )
+
+
 def test_should_remember_message_skips_duplicate_same_role_message() -> None:
     messages = [
         {"role": "user", "content": "Сделай тест-кейсы"},
@@ -80,24 +187,35 @@ def test_should_remember_message_skips_duplicate_same_role_message() -> None:
     assert should_remember_message(messages, "user", "Сделай чек-лист") is True
 
 
-def test_validate_quick_action_without_api_key_returns_warning() -> None:
-    warning = validate_quick_action(
+def test_validate_task_run_without_api_key_returns_warning() -> None:
+    warning = validate_task_run(
         ChatContext(requirements=["requirements.md"], target_url="https://example.com"),
-        "Сделай тест-кейсы",
         has_api_key=False,
     )
 
-    assert warning == MISSING_QUICK_ACTION_API_KEY_WARNING
+    assert warning == MISSING_TASK_API_KEY_WARNING
 
 
-def test_validate_quick_action_without_generation_context_returns_warning() -> None:
-    warning = validate_quick_action(ChatContext(), "Сделай тест-кейсы", has_api_key=True)
+def test_validate_task_run_without_generation_context_returns_warning() -> None:
+    warning = validate_task_run(ChatContext(), has_api_key=True)
 
-    assert warning == MISSING_QUICK_ACTION_CONTEXT_WARNING
+    assert warning == MISSING_TASK_CONTEXT_WARNING
 
 
-def test_validate_quick_action_with_api_key_and_context_allows_message() -> None:
-    warning = validate_quick_action(ChatContext(target_url="https://example.com"), "Сделай тест-кейсы", has_api_key=True)
+def test_validate_task_run_with_api_key_and_requirements_allows_message() -> None:
+    warning = validate_task_run(ChatContext(requirements=["requirements.md"]), has_api_key=True)
+
+    assert warning is None
+
+
+def test_validate_task_run_with_api_key_and_target_url_allows_message() -> None:
+    warning = validate_task_run(ChatContext(target_url="https://example.com"), has_api_key=True)
+
+    assert warning is None
+
+
+def test_validate_task_run_with_api_key_and_session_id_allows_message() -> None:
+    warning = validate_task_run(ChatContext(session_id="session-1"), has_api_key=True)
 
     assert warning is None
 
@@ -139,7 +257,7 @@ def test_ai_action_without_api_key_does_not_call_runner() -> None:
     )
 
     assert response is None
-    assert warning == MISSING_QUICK_ACTION_API_KEY_WARNING
+    assert warning == MISSING_TASK_API_KEY_WARNING
     assert calls == []
 
 
@@ -158,13 +276,28 @@ def test_ai_action_without_generation_context_does_not_call_runner() -> None:
     )
 
     assert response is None
-    assert warning == MISSING_QUICK_ACTION_CONTEXT_WARNING
+    assert warning == MISSING_TASK_CONTEXT_WARNING
     assert calls == []
+
+
+def test_ai_action_warning_is_not_added_to_chat_history() -> None:
+    messages: list[dict[str, str]] = []
+
+    response, warning = run_validated_ai_action(
+        ChatContext(),
+        "Сделай тест-кейсы",
+        has_api_key=True,
+        messages=messages,
+    )
+
+    assert response is None
+    assert warning == MISSING_TASK_CONTEXT_WARNING
+    assert messages == []
 
 
 def test_duplicate_warning_messages_are_not_added_to_history_twice() -> None:
     messages: list[dict[str, str]] = []
 
-    assert remember_warning_once(messages, MISSING_QUICK_ACTION_API_KEY_WARNING) is True
-    assert remember_warning_once(messages, MISSING_QUICK_ACTION_API_KEY_WARNING) is False
-    assert messages == [{"role": "assistant", "content": MISSING_QUICK_ACTION_API_KEY_WARNING}]
+    assert remember_warning_once(messages, MISSING_TASK_API_KEY_WARNING) is True
+    assert remember_warning_once(messages, MISSING_TASK_API_KEY_WARNING) is False
+    assert messages == [{"role": "assistant", "content": MISSING_TASK_API_KEY_WARNING}]

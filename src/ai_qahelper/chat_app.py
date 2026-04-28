@@ -54,12 +54,24 @@ from ai_qahelper.ui_documents import (
 )
 
 SUPPORTED_UPLOAD_TYPES = ["md", "txt", "pdf", "docx", "xlsx", "xls"]
-QUICK_ACTIONS = (
-    ("Сгенерировать test cases через AI", "Сделай тест-кейсы"),
-    ("Сгенерировать checklist через AI", "Сделай чек-лист"),
-    ("Сгенерировать smoke через AI", "Сделай smoke test cases"),
-    ("Сгенерировать negative через AI", "Теперь сделай negative test cases"),
-    ("Найти риски через AI", "Найди риски и серые зоны по текущей сессии"),
+TASK_TYPES = (
+    "Test cases",
+    "Checklist",
+    "Quality check",
+    "Risk analysis",
+    "Bug reports draft",
+    "Autotests draft",
+)
+TASK_FOCUS_OPTIONS = (
+    "General",
+    "Smoke",
+    "Negative",
+    "Regression",
+    "Boundary",
+    "UI",
+    "API",
+    "Mobile",
+    "Accessibility",
 )
 MAIN_SCREEN_CAPTION = (
     "Загрузите требования или укажите URL тестируемого стенда, затем сформулируйте QA-задачу: "
@@ -69,10 +81,13 @@ MISSING_API_KEY_MESSAGE = (
     "OPENAI_API_KEY не найден. Вставьте ключ ниже и нажмите “Сохранить”.\n"
     "Ключ можно сохранить только на текущую сессию или записать в локальный .env."
 )
-MISSING_QUICK_ACTION_API_KEY_WARNING = "Сначала добавьте OPENAI_API_KEY в блоке ‘Настройка AI’."
-MISSING_QUICK_ACTION_CONTEXT_WARNING = (
-    "Сначала загрузите требования, укажите URL тестируемого стенда или выберите существующую Session ID."
+MISSING_TASK_API_KEY_WARNING = "Добавьте OPENAI_API_KEY в блоке «Настройка AI», чтобы использовать AI."
+MISSING_TASK_CONTEXT_WARNING = (
+    "Недостаточно входных данных. Загрузите требования, укажите URL тестируемого стенда "
+    "или выберите существующую Session ID."
 )
+MISSING_QUICK_ACTION_API_KEY_WARNING = MISSING_TASK_API_KEY_WARNING
+MISSING_QUICK_ACTION_CONTEXT_WARNING = MISSING_TASK_CONTEXT_WARNING
 
 
 def _init_state() -> None:
@@ -116,16 +131,39 @@ def has_generation_context(context: ChatContext) -> bool:
     return bool(context.requirements or context.requirement_urls or context.target_url or context.session_id)
 
 
-def validate_quick_action(context: ChatContext, prompt: str, *, has_api_key: bool | None = None) -> str | None:
-    if not prompt:
-        return None
+def build_task_prompt(task_type: str, focus: str, max_cases: int | None = None) -> str:
+    normalized_focus = (focus or "General").strip()
+    focus_prefix = "" if normalized_focus == "General" else f"{normalized_focus.lower()} "
+
+    if task_type == "Test cases":
+        return f"Сгенерируй {focus_prefix}test cases по текущему контексту с полным покрытием требований."
+    if task_type == "Checklist":
+        return f"Сгенерируй {focus_prefix}checklist по текущему контексту с полным покрытием требований."
+    if task_type == "Quality check":
+        return "Проверь качество текущей тестовой документации."
+    if task_type == "Risk analysis":
+        return "Найди риски, противоречия и серые зоны в требованиях."
+    if task_type == "Bug reports draft":
+        return "Создай черновики bug reports по текущей сессии и найденным проблемам."
+    if task_type == "Autotests draft":
+        return "Подготовь Playwright/pytest автотесты по текущей сессии, но не запускай их."
+    raise ValueError(f"Unknown task type: {task_type}")
+
+
+def validate_task_run(context: ChatContext, *, has_api_key: bool | None = None) -> str | None:
     if has_api_key is None:
         has_api_key = get_openai_api_key() is not None
     if not has_api_key:
-        return MISSING_QUICK_ACTION_API_KEY_WARNING
+        return MISSING_TASK_API_KEY_WARNING
     if not has_generation_context(context):
-        return MISSING_QUICK_ACTION_CONTEXT_WARNING
+        return MISSING_TASK_CONTEXT_WARNING
     return None
+
+
+def validate_quick_action(context: ChatContext, prompt: str, *, has_api_key: bool | None = None) -> str | None:
+    if not prompt:
+        return None
+    return validate_task_run(context, has_api_key=has_api_key)
 
 
 def remember_warning_once(messages: list[dict[str, str]], warning: str) -> bool:
@@ -147,8 +185,6 @@ def run_validated_ai_action(
 ) -> tuple[ChatResponse | None, str | None]:
     warning = validate_quick_action(context, prompt, has_api_key=has_api_key)
     if warning:
-        if messages is not None:
-            remember_warning_once(messages, warning)
         return None, warning
     runner = ai_runner or run_ai_action
     return runner(context, prompt), None
@@ -190,27 +226,16 @@ def _save_uploaded_files(uploaded_files: list[Any]) -> list[str]:
     return paths
 
 
-def _render_sidebar() -> tuple[list[str], str | None]:
-    st.sidebar.header("Контекст")
-    st.sidebar.subheader("Файлы требований")
-    st.sidebar.caption(".md, .txt, .pdf, .docx, .xlsx, .xls")
-    uploaded_files = st.sidebar.file_uploader(
-        "Загрузить требования",
-        type=SUPPORTED_UPLOAD_TYPES,
-        accept_multiple_files=True,
-        label_visibility="collapsed",
-    )
-    target_url = st.sidebar.text_input("Ссылка на тестируемый сайт", value=st.session_state.last_target_url)
-    if target_url:
-        st.session_state.last_target_url = target_url
-    figma_file_key = st.sidebar.text_input("Figma file key", value=st.session_state.last_figma_file_key)
-    st.session_state.last_figma_file_key = figma_file_key
-    session_id = st.sidebar.text_input("ID текущей сессии", value=st.session_state.last_session_id)
-    st.session_state.last_session_id = session_id
+def _render_sidebar() -> list[str]:
+    st.sidebar.header("Workspace")
+    session_id = st.sidebar.text_input("Session ID", value=st.session_state.last_session_id)
+    st.session_state.last_session_id = session_id.strip()
     output = st.sidebar.selectbox("Тип результата", ["testcases", "checklist"], index=0)
     st.session_state.output = output
-    max_cases = st.sidebar.number_input("Количество проверок", min_value=1, max_value=200, value=30)
-    st.session_state.max_cases = int(max_cases)
+    st.sidebar.info(
+        "Агент сам определяет объём документации на основе покрытия требований. "
+        "После генерации будет создан coverage report."
+    )
     st.sidebar.subheader("Дополнительные настройки")
     st.session_state.with_bug_drafts = st.sidebar.checkbox("Создавать черновики bug reports", value=False)
     st.session_state.skip_test_analysis = st.sidebar.checkbox("Пропустить отдельный test analysis", value=False)
@@ -261,29 +286,39 @@ def _render_sidebar() -> tuple[list[str], str | None]:
         "URL таблицы для баг-репортов",
         value=st.session_state.bug_reports_sheet_url,
     )
-    if st.sidebar.button("Очистить историю"):
-        for key in [
-            "messages",
-            "last_session_id",
-            "last_target_url",
-            "last_requirements",
-            "last_figma_file_key",
-            "pending_plan",
-            "pending_message",
-            "agent_context",
-        ]:
-            st.session_state.pop(key, None)
-        st.rerun()
     if st.session_state.last_session_id and not st.session_state.agent_context:
         st.session_state.agent_context = load_agent_memory(st.session_state.last_session_id).to_dict()
     if st.session_state.last_session_id:
         st.sidebar.success(f"Активная сессия: {st.session_state.last_session_id}")
-    st.sidebar.subheader("Быстрые действия")
-    sidebar_quick_prompt = _render_quick_actions_sidebar()
-    uploaded_paths = _save_uploaded_files(uploaded_files)
-    if uploaded_paths:
-        st.session_state.last_requirements = uploaded_paths
-    return uploaded_paths or st.session_state.last_requirements, sidebar_quick_prompt
+    return st.session_state.last_requirements
+
+
+def _render_context_panel() -> list[str]:
+    with st.container(border=True):
+        st.subheader("Project Setup")
+        st.caption("Задайте входной контекст для QA workflow: требования, стенд, Figma или существующую сессию.")
+        left, right = st.columns([2, 1])
+        with left:
+            uploaded_files = st.file_uploader(
+                "Requirements files",
+                type=SUPPORTED_UPLOAD_TYPES,
+                accept_multiple_files=True,
+                help="Поддерживаются .md, .txt, .pdf, .docx, .xlsx, .xls",
+            )
+            uploaded_paths = _save_uploaded_files(uploaded_files)
+            if uploaded_paths:
+                st.session_state.last_requirements = uploaded_paths
+            target_url = st.text_input("Target URL", value=st.session_state.last_target_url)
+            st.session_state.last_target_url = target_url.strip()
+        with right:
+            figma_file_key = st.text_input("Figma file key", value=st.session_state.last_figma_file_key)
+            st.session_state.last_figma_file_key = figma_file_key.strip()
+            session_id = st.text_input("Continue Session ID", value=st.session_state.last_session_id, key="generate-session-id")
+            st.session_state.last_session_id = session_id.strip()
+            if st.session_state.last_session_id and not st.session_state.agent_context:
+                st.session_state.agent_context = load_agent_memory(st.session_state.last_session_id).to_dict()
+        _render_task_readiness(_build_context(st.session_state.last_requirements), has_api_key=get_openai_api_key() is not None)
+    return st.session_state.last_requirements
 
 
 def _build_context(requirements: list[str]) -> ChatContext:
@@ -292,7 +327,7 @@ def _build_context(requirements: list[str]) -> ChatContext:
         figma_file_key=st.session_state.last_figma_file_key or None,
         target_url=st.session_state.last_target_url or None,
         session_id=st.session_state.last_session_id or None,
-        max_cases=st.session_state.max_cases,
+        max_cases=None,
         output=st.session_state.output,
         with_bug_drafts=st.session_state.with_bug_drafts,
         skip_test_analysis=st.session_state.skip_test_analysis,
@@ -313,7 +348,6 @@ def _sync_context(context: ChatContext) -> None:
     st.session_state.last_target_url = context.target_url or ""
     st.session_state.last_requirements = context.requirements
     st.session_state.last_figma_file_key = context.figma_file_key or ""
-    st.session_state.max_cases = context.max_cases or st.session_state.max_cases
     st.session_state.test_cases_sheet_url = context.test_cases_sheet_url or ""
     st.session_state.bug_reports_sheet_url = context.bug_reports_sheet_url or ""
     st.session_state.site_discovery_max_pages = context.site_discovery_max_pages
@@ -365,41 +399,81 @@ def _render_next_steps(response: ChatResponse) -> None:
         st.write(f"- {step}")
 
 
-def _render_quick_actions() -> str | None:
-    columns = st.columns(3)
-    for idx, (label, command) in enumerate(QUICK_ACTIONS):
-        if columns[idx % 3].button(label, key=f"main-quick-{label}"):
-            return command
+def _render_task_launcher(context: ChatContext) -> str | None:
+    return _render_workflow_cards(context)
+
+
+def _render_workflow_cards(context: ChatContext) -> str | None:
+    cards = [
+        ("Generate test cases", "Test cases", "General", "Полный набор test cases по требованиям и test conditions."),
+        ("Generate checklist", "Checklist", "General", "Атомарный checklist для ручной проверки покрытия."),
+        ("Negative coverage", "Test cases", "Negative", "Негативные сценарии, ошибки валидации и отказные состояния."),
+        ("Smoke coverage", "Test cases", "Smoke", "Критический happy path и базовая доступность функций."),
+        ("Coverage report", "Quality check", "General", "Проверить текущую документацию и coverage artifacts."),
+        ("Quality review", "Risk analysis", "General", "Найти риски, gaps и слабые места документации."),
+    ]
+    with st.container(border=True):
+        st.subheader("QA Workflow")
+        st.caption(
+            "Запустите готовый coverage-first сценарий. Агент сам определит нужное количество проверок."
+        )
+        has_api_key = get_openai_api_key() is not None
+        _render_task_readiness(context, has_api_key=has_api_key)
+        st.info(
+            "Агент сам определяет объём документации на основе покрытия требований. "
+            "После генерации будет создан coverage report."
+        )
+        for row_start in range(0, len(cards), 3):
+            cols = st.columns(3)
+            for col, (label, task_type, focus, description) in zip(cols, cards[row_start : row_start + 3], strict=False):
+                with col:
+                    with st.container(border=True):
+                        st.markdown(f"**{label}**")
+                        st.caption(description)
+                        if st.button("Run", key=f"workflow-{label}", type="primary" if row_start == 0 and label == "Generate test cases" else "secondary"):
+                            warning = validate_task_run(context, has_api_key=has_api_key)
+                            if warning:
+                                st.warning(warning)
+                                return None
+                            return build_task_prompt(task_type, focus)
     return None
 
 
-def _render_quick_actions_sidebar() -> str | None:
-    for label, command in QUICK_ACTIONS:
-        if st.sidebar.button(label, key=f"sidebar-quick-{label}"):
-            return command
-    return None
+def _render_task_readiness(context: ChatContext, *, has_api_key: bool) -> None:
+    requirements_ready = bool(context.requirements or context.requirement_urls)
+    target_url_ready = bool(context.target_url)
+    session_ready = bool(context.session_id)
+    status_cols = st.columns(4)
+    status_cols[0].write(f"OPENAI_API_KEY: {'найден' if has_api_key else 'не найден'}")
+    status_cols[1].write(f"Требования: {'загружены' if requirements_ready else 'не загружены'}")
+    status_cols[2].write(f"URL стенда: {'указан' if target_url_ready else 'не указан'}")
+    status_cols[3].write(f"Session ID: {'активна' if session_ready else 'не активна'}")
+    if has_api_key and (requirements_ready or target_url_ready or session_ready):
+        st.success("Готовность: AI настроен, входной контекст доступен.")
+    else:
+        st.info("Для запуска нужно добавить OPENAI_API_KEY и загрузить требования/указать URL стенда.")
 
 
-def _render_chat_controls() -> str | None:
-    with st.expander("Быстрые действия", expanded=True):
-        quick_prompt = _render_quick_actions()
-        if st.button("Очистить чат"):
-            clear_chat_state(st.session_state)
-            st.rerun()
-    return quick_prompt
+def _render_manual_command_header() -> None:
+    cols = st.columns([3, 1])
+    cols[0].subheader("Ручная команда")
+    cols[0].caption("Используйте чат для произвольных QA-команд вне карточек workflow.")
+    if cols[1].button("Очистить чат", key="manual-clear-chat"):
+        clear_chat_state(st.session_state)
+        st.rerun()
 
 
 def _render_welcome() -> None:
     st.info(
-        "Начните с загрузки требований в боковой панели или укажите URL тестируемого стенда для Site Discovery.",
+        "Начните с Project Setup: загрузите требования или укажите URL тестируемого стенда для Site Discovery.",
         icon="💡",
     )
     col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("Быстрый старт")
-        st.write("1. Загрузите requirements в боковой панели.")
+        st.write("1. Загрузите requirements в Project Setup.")
         st.write("2. Укажите ссылку на тестируемый сайт.")
-        st.write("3. Нажмите быструю кнопку или напишите команду.")
+        st.write("3. Запустите карточку QA Workflow или напишите ручную команду.")
     with col2:
         st.subheader("Примеры команд")
         st.write("- `Сделай smoke test cases`")
@@ -409,8 +483,9 @@ def _render_welcome() -> None:
     with col3:
         st.subheader("Что умеет агент")
         st.write("- Test cases и checklists")
+        st.write("- Coverage report и gaps/risks")
         st.write("- Site Discovery без требований")
-        st.write("- Quality reports и dedup")
+        st.write("- Quality review и dedup")
         st.write("- Playwright/pytest starter tests")
     st.caption(
         "Если требований нет — вставьте Target URL и напишите: "
@@ -496,6 +571,8 @@ def _download_label(path: Path) -> str:
         return "Скачать checklist.xlsx"
     if "quality-report" in name:
         return "Скачать quality report"
+    if "coverage-report" in name:
+        return "Скачать coverage report"
     if "exploratory-report" in name:
         return "Скачать exploratory report"
     if path.suffix.lower() == ".json":
@@ -515,10 +592,76 @@ def _session_required() -> str | None:
     return session_id
 
 
+def _coverage_report_path_for_ui(session_id: str) -> Path | None:
+    files = list_export_files(session_id)
+    for item in files:
+        path = Path(item["path"])
+        if path.name.startswith("coverage-report") and path.suffix.lower() == ".json":
+            return path
+    return None
+
+
+def _load_coverage_report_for_ui(session_id: str) -> dict[str, Any] | None:
+    path = _coverage_report_path_for_ui(session_id)
+    if path is None or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _render_empty_state(title: str, message: str, action: str | None = None) -> None:
+    with st.container(border=True):
+        st.subheader(title)
+        st.write(message)
+        if action:
+            st.caption(action)
+
+
+def _render_coverage_dashboard(report: dict[str, Any] | None, *, compact: bool = False) -> None:
+    if not report:
+        _render_empty_state(
+            "Coverage report пока не создан",
+            "Запустите coverage-first генерацию во вкладке Generate, чтобы увидеть покрытие требований и gaps.",
+            "Основной артефакт: runs/<session_id>/coverage-report.json",
+        )
+        return
+    summary = report.get("summary") or {}
+    cols = st.columns(4)
+    cols[0].metric("Requirements", f"{summary.get('requirements_covered', 0)}/{summary.get('requirements_total', 0)}")
+    cols[1].metric("Partial", summary.get("requirements_partial", 0))
+    cols[2].metric("Uncovered", summary.get("requirements_uncovered", 0))
+    cols[3].metric("Gaps", len(report.get("gaps") or []))
+    cols = st.columns(4)
+    cols[0].metric("Test conditions", f"{summary.get('test_conditions_covered', 0)}/{summary.get('test_conditions_total', 0)}")
+    cols[1].metric("Test cases", summary.get("test_cases_total", 0))
+    cols[2].metric("Duplicates removed", summary.get("duplicates_removed", 0))
+    cols[3].metric("Coverage status", "Ready" if not summary.get("requirements_uncovered") else "Needs review")
+    if compact:
+        return
+    st.subheader("Requirements Coverage")
+    requirements = report.get("requirements") or []
+    if requirements:
+        st.dataframe(pd.DataFrame(requirements), use_container_width=True)
+    st.subheader("Test Conditions")
+    conditions = report.get("test_conditions") or []
+    if conditions:
+        st.dataframe(pd.DataFrame(conditions), use_container_width=True)
+    gaps = report.get("gaps") or []
+    if gaps:
+        st.subheader("Gaps / Risks")
+        st.dataframe(pd.DataFrame(gaps), use_container_width=True)
+
+
 def _render_dashboard_tab() -> None:
     # Do not call LLM from tab render. LLM is allowed only after explicit user action.
     st.subheader("Dashboard")
-    st.write("AI key:", "готов" if get_openai_api_key() else "не задан")
+    readiness = st.columns(4)
+    readiness[0].metric("AI key", "готов" if get_openai_api_key() else "не задан")
+    readiness[1].metric("Requirements", len(st.session_state.last_requirements))
+    readiness[2].metric("Target URL", "указан" if st.session_state.last_target_url else "не указан")
+    readiness[3].metric("Session", _active_session_id() or "-")
     session_id = _session_required()
     if not session_id:
         return
@@ -537,27 +680,43 @@ def _render_dashboard_tab() -> None:
     no_requirement = int(combined.get("quality_issues", pd.Series(dtype=str)).str.contains("No requirement link", na=False).sum())
     duplicates = int(combined.get("duplicate_candidate", pd.Series(dtype=bool)).fillna(False).sum())
     needs_review = int(combined.get("quality_status", pd.Series(dtype=str)).eq("Needs review").sum())
-    cols = st.columns(6)
-    cols[0].metric("Session ID", session_id)
-    cols[1].metric("Test cases", len(tc_df))
-    cols[2].metric("Checklist", len(checklist_df))
-    cols[3].metric("Needs review", needs_review)
-    cols[4].metric("Missing fields", missing_fields)
-    cols[5].metric("Duplicate candidates", duplicates)
+    cols = st.columns(5)
+    cols[0].metric("Test cases", len(tc_df))
+    cols[1].metric("Checklist", len(checklist_df))
+    cols[2].metric("Needs review", needs_review)
+    cols[3].metric("Missing fields", missing_fields)
+    cols[4].metric("Duplicate candidates", duplicates)
     st.metric("No requirement link", no_requirement)
+    st.subheader("Coverage")
+    _render_coverage_dashboard(_load_coverage_report_for_ui(session_id), compact=True)
     st.subheader("Последние артефакты")
     st.dataframe(pd.DataFrame(list_export_files(session_id)).head(10), use_container_width=True)
 
 
-def _render_generate_tab(uploaded_paths: list[str], sidebar_quick_prompt: str | None) -> None:
+def _render_coverage_tab() -> None:
+    # Do not call LLM from tab render. LLM is allowed only after explicit user action.
+    st.subheader("Coverage")
+    session_id = _session_required()
+    if not session_id:
+        return
+    report_path = _coverage_report_path_for_ui(session_id)
+    if report_path:
+        st.caption(f"Coverage report: `{report_path}`")
+    _render_coverage_dashboard(_load_coverage_report_for_ui(session_id))
+
+
+def _render_generate_tab(uploaded_paths: list[str]) -> None:
     st.subheader("Generate")
     _render_setup_warning()
+    uploaded_paths = _render_context_panel()
     if not st.session_state.messages:
         _render_welcome()
-    quick_prompt = sidebar_quick_prompt or _render_chat_controls()
+    context = _build_context(uploaded_paths)
+    task_prompt = _render_task_launcher(context)
     _render_chat_history()
+    _render_manual_command_header()
     _render_pending_confirmation(uploaded_paths)
-    _handle_generate_prompt(uploaded_paths, quick_prompt)
+    _handle_generate_prompt(uploaded_paths, task_prompt)
 
 
 def _render_chat_history() -> None:
@@ -590,19 +749,13 @@ def _render_pending_confirmation(uploaded_paths: list[str]) -> None:
             st.rerun()
 
 
-def _handle_generate_prompt(uploaded_paths: list[str], quick_prompt: str | None) -> None:
+def _handle_generate_prompt(uploaded_paths: list[str], task_prompt: str | None) -> None:
     context = _build_context(uploaded_paths)
-    prompt = quick_prompt or st.chat_input("Напиши задачу: сделай тест-кейсы, запусти автотесты, создай баги...")
+    prompt = task_prompt or st.chat_input("Например: сделай negative cases только для авторизации...")
     if not prompt:
         return
-    if quick_prompt:
-        response, warning = run_validated_ai_action(context, prompt, messages=st.session_state.messages)
-        if warning:
-            st.warning(warning)
-            return
-    else:
-        _remember_unique("user", prompt)
-        response = None
+    _remember_unique("user", prompt)
+    response = None
     with st.chat_message("user"):
         st.markdown(prompt)
     with st.chat_message("assistant"):
@@ -633,11 +786,22 @@ def _render_ai_response(response: ChatResponse) -> None:
 
 def _render_requirements_tab() -> None:
     st.subheader("Requirements")
+    if not st.session_state.last_requirements and not st.session_state.last_target_url and not st.session_state.last_figma_file_key:
+        _render_empty_state(
+            "Контекст ещё не задан",
+            "Откройте Generate и заполните Project Setup: загрузите требования, target URL или Figma key.",
+        )
+        return
     st.write("Requirements files:")
-    for path in st.session_state.last_requirements:
-        st.write(f"- `{path}`")
+    if st.session_state.last_requirements:
+        for path in st.session_state.last_requirements:
+            st.write(f"- `{path}`")
+    else:
+        st.caption("Файлы требований пока не загружены.")
     if st.session_state.last_target_url:
         st.write(f"Target URL: `{st.session_state.last_target_url}`")
+    if st.session_state.last_figma_file_key:
+        st.write(f"Figma file key: `{st.session_state.last_figma_file_key}`")
 
 
 def _render_test_cases_tab(uploaded_paths: list[str]) -> None:
@@ -716,7 +880,10 @@ def _render_artifact_table_tab(
     template = load_active_template(artifact_type, session_id)
     df = build_local_quality_status(load_fn(session_id), artifact_type, template)
     if df.empty:
-        st.info("JSON-артефакт для текущей сессии не найден.")
+        _render_empty_state(
+            f"{title} пока не созданы",
+            "Запустите подходящую карточку во вкладке Generate, затем вернитесь сюда для review.",
+        )
         return
     filtered = _render_table_filters(_visible_template_columns(df, template), artifact_type, title.lower().replace(" ", "-"))
     edited = st.data_editor(filtered, use_container_width=True, num_rows="dynamic", key=f"{artifact_type}-editor")
@@ -831,16 +998,23 @@ def _render_quality_tab(uploaded_paths: list[str]) -> None:
     )
 
 
-def _render_review_tab() -> None:
+def _render_review_tab(uploaded_paths: list[str]) -> None:
     # Do not call LLM from tab render. LLM is allowed only after explicit user action.
     st.subheader("Review")
     session_id = _session_required()
     if not session_id:
         return
+    with st.expander("Quality review", expanded=False):
+        _render_quality_tab(uploaded_paths)
+    with st.expander("Bug reports", expanded=False):
+        _render_bug_reports_tab(uploaded_paths)
     original = load_test_cases_for_ui(session_id, prefer_edited=False)
     edited = load_test_cases_for_ui(session_id, prefer_edited=True)
     if edited.empty:
-        st.info("Test cases для review не найдены.")
+        _render_empty_state(
+            "Test cases для review не найдены",
+            "Сначала запустите Generate test cases или Smoke/Negative coverage во вкладке Generate.",
+        )
         return
     status = st.selectbox("Массово изменить status", ["", "Draft", "Needs review", "Approved"], key="review-status")
     priority = st.selectbox("Массово изменить priority", ["", "low", "medium", "high", "critical"], key="review-priority")
@@ -871,30 +1045,41 @@ def _render_export_tab() -> None:
     if not session_id:
         return
     files = list_export_files(session_id)
-    st.dataframe(pd.DataFrame(files), use_container_width=True)
-    for item in files:
-        path = Path(item["path"])
-        with st.expander(f"{item['type']}: {item['name']}"):
-            st.write(f"`{path}`")
-            st.download_button(f"Скачать {path.name}", data=path.read_bytes(), file_name=path.name, key=f"export-{path}")
-            if path.suffix.lower() in {".json", ".md"}:
-                _render_artifact_preview(path)
-    col1, col2, col3 = st.columns(3)
-    if col1.button("Скачать final XLSX"):
-        paths = []
-        if load_test_cases_for_ui(session_id).shape[0]:
-            paths.append(export_final_test_cases_xlsx(session_id))
-        if load_checklist_for_ui(session_id).shape[0]:
-            paths.append(export_final_checklist_xlsx(session_id))
-        if load_bug_reports_for_ui(session_id).shape[0]:
-            paths.append(export_final_bug_reports_xlsx(session_id))
-        st.success("Создано: " + ", ".join(f"`{p}`" for p in paths))
-    if col2.button("Скачать все final-файлы ZIP"):
-        path = create_final_files_zip(session_id)
-        st.download_button("Скачать final ZIP", data=path.read_bytes(), file_name=path.name)
-    if col3.button("Скачать всю сессию ZIP"):
-        path = create_session_zip(session_id)
-        st.download_button("Скачать session ZIP", data=path.read_bytes(), file_name=path.name)
+    if not files:
+        _render_empty_state(
+            "Артефакты пока не созданы",
+            "Запустите coverage-first генерацию во вкладке Generate, чтобы здесь появились JSON/CSV/XLSX файлы.",
+        )
+    else:
+        st.dataframe(pd.DataFrame(files), use_container_width=True)
+        coverage_path = _coverage_report_path_for_ui(session_id)
+        if coverage_path:
+            st.success(f"Coverage report готов: `{coverage_path}`")
+        for item in files:
+            path = Path(item["path"])
+            with st.expander(f"{item['type']}: {item['name']}"):
+                st.write(f"`{path}`")
+                st.download_button(f"Скачать {path.name}", data=path.read_bytes(), file_name=path.name, key=f"export-{path}")
+                if path.suffix.lower() in {".json", ".md"}:
+                    _render_artifact_preview(path)
+        col1, col2, col3 = st.columns(3)
+        if col1.button("Скачать final XLSX"):
+            paths = []
+            if load_test_cases_for_ui(session_id).shape[0]:
+                paths.append(export_final_test_cases_xlsx(session_id))
+            if load_checklist_for_ui(session_id).shape[0]:
+                paths.append(export_final_checklist_xlsx(session_id))
+            if load_bug_reports_for_ui(session_id).shape[0]:
+                paths.append(export_final_bug_reports_xlsx(session_id))
+            st.success("Создано: " + ", ".join(f"`{p}`" for p in paths))
+        if col2.button("Скачать все final-файлы ZIP"):
+            path = create_final_files_zip(session_id)
+            st.download_button("Скачать final ZIP", data=path.read_bytes(), file_name=path.name)
+        if col3.button("Скачать всю сессию ZIP"):
+            path = create_session_zip(session_id)
+            st.download_button("Скачать session ZIP", data=path.read_bytes(), file_name=path.name)
+    with st.expander("Settings and templates"):
+        _render_settings_tab()
 
 
 def _render_settings_tab() -> None:
@@ -902,7 +1087,6 @@ def _render_settings_tab() -> None:
     st.subheader("Settings")
     st.write(f"session_id: `{_active_session_id() or '-'}`")
     st.write(f"target_url: `{st.session_state.last_target_url or '-'}`")
-    st.write(f"max_cases: `{st.session_state.max_cases}`")
     st.write(f"output type: `{st.session_state.output}`")
     st.write("AI key status:", "задан" if get_openai_api_key() else "не задан")
     _render_templates_settings()
@@ -1030,7 +1214,7 @@ def main() -> None:
     load_project_env()
     _init_state()
 
-    uploaded_paths, sidebar_quick_prompt = _render_sidebar()
+    uploaded_paths = _render_sidebar()
 
     st.title("AI QAHelper — помощник тестировщика")
     st.caption(MAIN_SCREEN_CAPTION)
@@ -1038,36 +1222,30 @@ def main() -> None:
         [
             "Dashboard",
             "Generate",
+            "Coverage",
             "Requirements",
             "Test Cases",
             "Checklist",
-            "Bug Reports",
-            "Quality",
             "Review",
             "Export",
-            "Settings",
         ]
     )
     with tabs[0]:
         _render_dashboard_tab()
     with tabs[1]:
-        _render_generate_tab(uploaded_paths, sidebar_quick_prompt)
+        _render_generate_tab(uploaded_paths)
     with tabs[2]:
-        _render_requirements_tab()
+        _render_coverage_tab()
     with tabs[3]:
-        _render_test_cases_tab(uploaded_paths)
+        _render_requirements_tab()
     with tabs[4]:
-        _render_checklist_tab(uploaded_paths)
+        _render_test_cases_tab(uploaded_paths)
     with tabs[5]:
-        _render_bug_reports_tab(uploaded_paths)
+        _render_checklist_tab(uploaded_paths)
     with tabs[6]:
-        _render_quality_tab(uploaded_paths)
+        _render_review_tab(uploaded_paths)
     with tabs[7]:
-        _render_review_tab()
-    with tabs[8]:
         _render_export_tab()
-    with tabs[9]:
-        _render_settings_tab()
 
 
 if __name__ == "__main__":

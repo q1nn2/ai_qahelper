@@ -310,7 +310,7 @@ def default_next_steps(context: ChatContext) -> list[str]:
         ]
     return [
         "Загрузить требования",
-        "Вставить target URL сайта",
+        "Указать URL тестируемого стенда",
         "Продолжить с текущей сессией, если есть Session ID",
     ]
 
@@ -382,10 +382,24 @@ def _result_counts(results: list[dict]) -> list[str]:
         summary = result.get("summary")
         if not isinstance(summary, dict):
             continue
-        if summary.get("test_cases") is not None:
-            counts.append(f"test cases: {summary['test_cases']}")
+        if summary.get("requirements_total") is not None:
+            counts.append(f"Требований: {summary['requirements_total']}")
+        if summary.get("test_conditions_total") is not None:
+            counts.append(f"Test conditions: {summary['test_conditions_total']}")
+        if summary.get("created_test_cases") is not None:
+            counts.append(f"Создано test cases: {summary['created_test_cases']}")
+        elif summary.get("test_cases") is not None:
+            counts.append(f"Итоговое количество test cases: {summary['test_cases']}")
         if summary.get("checklist_items") is not None:
-            counts.append(f"checklist items: {summary['checklist_items']}")
+            counts.append(f"Checklist items: {summary['checklist_items']}")
+        if summary.get("duplicates_removed") is not None:
+            counts.append(f"Удалено дублей: {summary['duplicates_removed']}")
+        if summary.get("requirements_covered") is not None and summary.get("requirements_total") is not None:
+            counts.append(f"Покрытие требований: {summary['requirements_covered']}/{summary['requirements_total']}")
+        if summary.get("requirements_uncovered") is not None:
+            counts.append(f"Непокрытые требования: {summary['requirements_uncovered']}")
+        if result.get("coverage_report_path"):
+            counts.append(f"Coverage report: {result['coverage_report_path']}")
         for key in ("missing", "contradiction", "ambiguity"):
             if summary.get(key):
                 counts.append(f"{key}: {summary[key]}")
@@ -399,7 +413,7 @@ def _format_clarification(question: str, context: ChatContext) -> str:
     return (
         f"{base}\n\nМожно сделать одно из трёх:\n"
         "- загрузить requirements в боковой панели;\n"
-        "- вставить target URL сайта для Site Discovery;\n"
+        "- указать URL тестируемого стенда для Site Discovery;\n"
         "- указать существующий Session ID, если нужно продолжить прошлую сессию."
     )
 
@@ -427,7 +441,7 @@ def _clarification_next_steps(missing_inputs: list[str]) -> list[str]:
     if "requirements" in missing_inputs:
         steps.append("Загрузить требования")
     if "target_url" in missing_inputs:
-        steps.append("Вставить target URL сайта")
+        steps.append("Указать URL тестируемого стенда")
     steps.append("Продолжить с текущей сессией, если есть Session ID")
     return _unique(steps)
 
@@ -438,16 +452,9 @@ def _unique(items: list[str]) -> list[str]:
 
 _URL_RE = re.compile(r"https?://[^\s)\],;!]+")
 _FIGMA_KEY_RE = re.compile(r"figma\.com/(?:file|design)/([^/\s?]+)", re.IGNORECASE)
-_MAX_CASES_RE = re.compile(
-    r"(?:max[-_\s]?cases|максимум|до|ровно|сделай)\s*(\d+)|(\d+)\s*(?:тест[-_\s]?кейсов|кейсов|проверок|чек[-_\s]?лист)",
-    re.IGNORECASE,
-)
-
-
 def update_context_from_message(context: ChatContext, message: str) -> None:
     urls = [_clean_url(url) for url in _URL_RE.findall(message)]
     if not urls:
-        _extract_max_cases(context, message)
         return
 
     sheets = [url for url in urls if "docs.google.com/spreadsheets" in url.lower()]
@@ -471,20 +478,10 @@ def update_context_from_message(context: ChatContext, message: str) -> None:
     for url in regular_urls:
         if url != context.target_url and url not in context.requirement_urls:
             context.requirement_urls.append(url)
-    _extract_max_cases(context, message)
 
 
 def _clean_url(url: str) -> str:
     return url.rstrip(".,;!?)\"]}")
-
-
-def _extract_max_cases(context: ChatContext, message: str) -> None:
-    match = _MAX_CASES_RE.search(message)
-    if not match:
-        return
-    value = next((group for group in match.groups() if group), None)
-    if value:
-        context.max_cases = int(value)
 
 
 def _detect_target_url(message: str, urls: list[str]) -> str | None:

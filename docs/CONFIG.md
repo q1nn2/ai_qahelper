@@ -14,6 +14,38 @@ cp ai-tester.config.example.yaml ai-tester.config.yaml
 
 `ai-tester.config.yaml` не нужно коммитить: он может содержать локальные настройки и секреты.
 
+## Как добавить OPENAI_API_KEY
+
+Рекомендуемый способ для новичка — через браузер:
+
+1. Запустите `run_chat_windows.bat` или `run_chat.sh`.
+2. Откройте UI.
+3. Вставьте ключ в поле `OPENAI_API_KEY`.
+4. Включите `Сохранить ключ в локальный .env`, если не хотите вводить ключ при каждом запуске.
+5. Нажмите `Сохранить ключ`.
+
+Через `.env` в корне проекта:
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
+Через переменную окружения:
+
+Windows:
+
+```bash
+set OPENAI_API_KEY=sk-...
+```
+
+macOS/Linux:
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Замените `sk-...` на реальный ключ. Файл `.env` не коммитится, ключ не показывается в UI после сохранения и не пишется в логи.
+
 ## API keys
 
 OpenAI-compatible ключ можно задать через `.env` в корне проекта:
@@ -31,24 +63,24 @@ OPENAI_API_KEY=sk-...
 Также ключ можно задать через переменную окружения:
 
 ```bash
-set OPENAI_API_KEY=your_key_here
+set OPENAI_API_KEY=sk-...
 ```
 
 Unix:
 
 ```bash
-export OPENAI_API_KEY=your_key_here
+export OPENAI_API_KEY=sk-...
 ```
 
 В конфиге поле `llm.api_key_env` должно быть именем переменной, например `OPENAI_API_KEY`, а не самим секретом.
 
-Если ключа нет, chat mode покажет ошибку `Не найден OPENAI_API_KEY` и пример исправления.
+Если ключа нет или вместо него осталась заглушка, chat mode покажет блок `Настройка AI` и позволит вставить ключ прямо в браузере.
 
 ## Основные параметры
 
 - `llm.model` — модель для текстовой генерации.
 - `llm.base_url` — OpenAI-compatible endpoint.
-- `llm.max_test_cases` — количество test cases по умолчанию.
+- `llm.max_test_cases` — deprecated/no-op; генерация работает coverage-first и не использует фиксированное количество test cases.
 - `llm.max_output_tokens` — лимит ответа модели.
 - `llm.max_requirement_chars_per_source` — лимит текста одного источника в prompt.
 - `generate_test_analysis` — отдельный LLM-шаг тест-анализа перед генерацией.
@@ -107,7 +139,7 @@ export FIGMA_API_TOKEN=your_token_here
 
 В chat mode пользователь видит понятное сообщение об ошибке, а техническая деталь остаётся в expander `Техническая информация`.
 
-- `Не найден OPENAI_API_KEY`: добавьте ключ в `.env` или переменную окружения. Пример: `OPENAI_API_KEY=sk-...`.
+- `Не найден OPENAI_API_KEY`: вставьте ключ в блоке `Настройка AI`, сохраните его в `.env` или задайте переменную окружения. Пример: `OPENAI_API_KEY=sk-...`.
 - `Не загружены требования`: загрузите `.docx`, `.pdf`, `.xlsx` файл или вставьте ссылку на требования.
 - `Не указан Target URL`: вставьте ссылку на тестируемый сайт в боковой панели.
 - `Не удалось прочитать файл`: проверьте путь, расширение и доступ к файлу; если файл открыт в Excel/Word, закройте его и загрузите заново.
@@ -119,8 +151,6 @@ export FIGMA_API_TOKEN=your_token_here
 Cheap:
 
 ```yaml
-llm:
-  max_test_cases: 5
 generate_test_analysis: false
 pdf_vision: false
 ```
@@ -131,7 +161,6 @@ Normal:
 
 ```yaml
 llm:
-  max_test_cases: 10
   docx_vision: true
 generate_test_analysis: true
 pdf_vision: true
@@ -141,7 +170,6 @@ Deep:
 
 ```yaml
 llm:
-  max_test_cases: 30
   docx_vision: true
   docx_vision_max_images: 30
 generate_test_analysis: true

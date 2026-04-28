@@ -108,6 +108,7 @@ discover_site используй, когда requirements нет, но есть 
 
 Для каждого action верни поля:
 type, artifact_type, focus, max_cases, requires_confirmation, reason.
+max_cases оставляй null: агент сам определяет объём документации по покрытию требований.
 
 artifact_type: testcases | checklist | none.
 focus: smoke | regression | negative | api | ui | mobile | security | performance | accessibility | general.
@@ -216,7 +217,7 @@ def plan_message(
     effective_target_url = target_url if target_url is not None else getattr(context, "target_url", None)
     effective_session_id = session_id if session_id is not None else getattr(context, "session_id", None)
     effective_output = output if output is not None else getattr(context, "output", "testcases")
-    effective_max_cases = max_cases if max_cases is not None else getattr(context, "max_cases", None)
+    effective_max_cases = None
     effective_figma_file_key = figma_file_key if figma_file_key is not None else getattr(context, "figma_file_key", None)
     effective_test_cases_sheet_url = (
         test_cases_sheet_url if test_cases_sheet_url is not None else getattr(context, "test_cases_sheet_url", None)
@@ -321,7 +322,7 @@ def _build_user_prompt(
             "target_url": target_url,
             "session_id": session_id,
             "output": output,
-            "max_cases": max_cases,
+            "max_cases": None,
             "figma_file_key": figma_file_key,
             "test_cases_sheet_url": bool(test_cases_sheet_url),
             "bug_reports_sheet_url": bool(bug_reports_sheet_url),
@@ -358,7 +359,7 @@ def fallback_plan_message(
         requirement_urls if requirement_urls is not None else list(getattr(context, "requirement_urls", []) or [])
     )
     effective_output = output if output is not None else getattr(context, "output", "testcases")
-    effective_max_cases = max_cases if max_cases is not None else getattr(context, "max_cases", None)
+    effective_max_cases = None
     signals = _collect_fallback_signals(text, effective_output)
     wants_site_discovery = _wants_site_discovery(text) and not (effective_requirements or effective_requirement_urls)
 
@@ -462,7 +463,7 @@ def _normalize_plan(plan: ChatPlan, default_output: str | None, default_max_case
                 type=action.type,
                 artifact_type=artifact_type,
                 focus=action.focus,
-                max_cases=action.max_cases if action.max_cases is not None else default_max_cases,
+                max_cases=None,
                 requires_confirmation=action.requires_confirmation or action.type in CONFIRMATION_ACTIONS,
                 reason=action.reason,
             )
@@ -505,9 +506,9 @@ def _apply_clarification_rules(
                 update={
                     "needs_clarification": True,
                     "clarification_question": (
-                        "Не вижу требований, target URL или активной сессии. "
-                        "Хочешь загрузить требования, вставить URL сайта для Site Discovery "
-                        "или продолжить существующую сессию по Session ID?"
+                        "Недостаточно входных данных для генерации тестовой документации. "
+                        "Загрузите требования, укажите URL тестируемого стенда для Site Discovery "
+                        "или выберите существующую Session ID."
                     ),
                 }
             )
@@ -534,7 +535,7 @@ def _apply_clarification_rules(
                         type="agent_run",
                         artifact_type=artifact_type,
                         focus="general",
-                        max_cases=first_doc.max_cases if first_doc else None,
+                        max_cases=None,
                         requires_confirmation=False,
                         reason="Создать сессию перед выполнением запрошенных действий",
                     ),
@@ -663,12 +664,6 @@ def _extract_focus_sequence(text: str) -> list[Focus]:
 
 
 def _focus_max_cases(focus: Focus, default: int | None) -> int | None:
-    if default is not None:
-        return default
-    if focus == "smoke":
-        return 10
-    if focus == "negative":
-        return 15
     return None
 
 

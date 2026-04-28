@@ -66,7 +66,7 @@ def generate_docs_cmd(
     session_id: str,
     max_cases: Annotated[
         int | None,
-        typer.Option(help="Number of checklist items or test cases to generate; overrides config defaults"),
+        typer.Option(help="Deprecated/no-op: generation is coverage-first and does not use a fixed case count."),
     ] = None,
     with_bug_drafts: Annotated[
         bool,
@@ -85,7 +85,6 @@ def generate_docs_cmd(
     skip_a = True if skip_test_analysis else None
     state = generate_docs(
         session_id,
-        max_cases=max_cases,
         generate_bug_templates=bug_arg,
         skip_test_analysis=skip_a,
         artifact_type="checklist" if output == "checklist" else "testcases",
@@ -156,7 +155,7 @@ def agent_run_cmd(
     out_dir: Annotated[str | None, typer.Option(help="Optional output directory for summary file")] = None,
     max_cases: Annotated[
         int | None,
-        typer.Option(help="How many checklist items or test cases to generate; overrides config defaults"),
+        typer.Option(help="Deprecated/no-op: generation is coverage-first and does not use a fixed case count."),
     ] = None,
     with_bug_drafts: Annotated[
         bool,
@@ -185,7 +184,6 @@ def agent_run_cmd(
         figma_file_key,
         target_url=target_url,
         out_dir=out_dir,
-        max_cases=max_cases,
         with_bug_drafts=with_bug_drafts,
         skip_test_analysis=True if skip_test_analysis else None,
         session_label=session_label,

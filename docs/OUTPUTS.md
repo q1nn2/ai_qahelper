@@ -15,6 +15,7 @@ runs/<session_id>/
 | `session.json` | Метаданные сессии и пути к артефактам |
 | `unified-model.json` | Единая модель требований, дизайна и target URL |
 | `input-coverage-report.json` | Что агент увидел во входных файлах |
+| `coverage-report.json` | Покрытие требований и test conditions итоговыми test cases/checklist, включая gaps/risks |
 | `consistency-report.json` | Эвристика пропусков, противоречий и неоднозначностей |
 | `test-analysis.json` | LLM test analysis и test conditions, если включён |
 | `test-cases.json` | Тест-кейсы в структурированном JSON |
@@ -42,6 +43,12 @@ runs/<session_id>/
 `csv` — удобен для импорта в внешние системы и Google Sheets.
 
 `json` — удобен для агента, автоматизации и последующей обработки.
+
+## Coverage-first документация
+
+Агент не генерирует фиксированные 30 проверок. Он анализирует требования, выделяет test conditions и создаёт столько test cases или checklist items, сколько нужно для покрытия требований без дублей. Каждый test case/checklist item должен быть связан с источником через `source_refs`: `REQ-xxx`, `COND-xxx`, файл требований или URL.
+
+После дедупликации строится `coverage-report.json`. Если удаление дублей оставило непокрытые или частично покрытые conditions, агент делает короткую догенерацию только недостающих проверок, снова удаляет дубли и пересчитывает coverage. Неполные требования фиксируются как gaps/risks, а не подменяются выдуманными бизнес-правилами.
 
 ## Focused generation
 

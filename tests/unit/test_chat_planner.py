@@ -96,12 +96,12 @@ def test_message_links_update_context_before_planning() -> None:
 
     update_context_from_message(
         context,
-        "Вот требования https://docs.example.com/spec.md вот сайт https://app.example.com сделай smoke и negative до 7 кейсов",
+        "Вот требования https://docs.example.com/spec.md вот сайт https://app.example.com сделай smoke и negative",
     )
 
     assert context.requirement_urls == ["https://docs.example.com/spec.md"]
     assert context.target_url == "https://app.example.com"
-    assert context.max_cases == 7
+    assert context.max_cases is None
 
 
 def test_missing_requirements_and_session_asks_clarification() -> None:
@@ -121,9 +121,17 @@ def test_missing_all_inputs_returns_friendly_options() -> None:
 
     assert response.plan is not None
     assert response.plan.needs_clarification is True
-    assert "загрузить requirements" in response.message
+    assert "Недостаточно входных данных для генерации тестовой документации" in response.message
+    assert "URL тестируемого стенда" in response.message
     assert {"requirements", "target_url"}.issubset(set(response.missing_inputs))
     assert response.suggested_next_steps
+
+
+def test_missing_all_inputs_uses_professional_clarification_text() -> None:
+    response = handle_message(ChatContext(), "сделай тест-кейсы", allow_llm=False)
+
+    assert "Не вижу требований, target URL или активной сессии" not in response.message
+    assert "Недостаточно входных данных для генерации тестовой документации" in response.message
 
 
 def test_chat_response_contains_agent_fields(monkeypatch) -> None:
@@ -150,6 +158,41 @@ def test_chat_response_contains_agent_fields(monkeypatch) -> None:
     assert "Сделать negative test cases" in response.suggested_next_steps
     assert response.missing_inputs == []
     assert response.can_continue is True
+
+
+def test_chat_summary_contains_coverage_metrics(monkeypatch) -> None:
+    class FakeExecutor:
+        def execute(self, context, plan, user_message=""):
+            context.session_id = "s1"
+            return [
+                {
+                    "session_id": "s1",
+                    "title": "testcases",
+                    "test_cases_path": "runs/s1/test-cases.json",
+                    "coverage_report_path": "runs/s1/coverage-report.json",
+                    "summary": {
+                        "requirements_total": 12,
+                        "requirements_covered": 12,
+                        "requirements_uncovered": 0,
+                        "test_conditions_total": 27,
+                        "created_test_cases": 34,
+                        "test_cases": 29,
+                        "duplicates_removed": 5,
+                    },
+                }
+            ]
+
+    monkeypatch.setattr("ai_qahelper.chat_agent.save_agent_memory", lambda memory: None)
+    plan = ChatPlan(actions=[PlanAction(type="generate_docs", artifact_type="testcases")])
+
+    response = handle_message(ChatContext(session_id="s1"), "сделай тест-кейсы", plan=plan, executor=FakeExecutor())
+
+    assert "Требований: 12" in response.summary_for_user
+    assert "Test conditions: 27" in response.summary_for_user
+    assert "Создано test cases: 34" in response.summary_for_user
+    assert "Удалено дублей: 5" in response.summary_for_user
+    assert "Покрытие требований: 12/12" in response.summary_for_user
+    assert "Coverage report: runs/s1/coverage-report.json" in response.summary_for_user
 
 
 def test_agent_memory_persists_to_session_file(monkeypatch, tmp_path: Path) -> None:

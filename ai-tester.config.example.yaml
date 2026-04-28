@@ -15,7 +15,7 @@ llm:
   # max_requirement_chars_per_source: 52000
   # max_consistency_findings: 40
   # max_analysis_json_chars: 16000
-  # max_test_cases: 5  # число тест-кейсов (перекрывается флагом --max-cases); 5 — удобно для проверки агента
+  # max_test_cases deprecated/no-op: агент сам определяет объём документации по coverage.
   # vision_model: "gpt-4o-mini"  # модель с vision для скриншотов страниц PDF (отдельные запросы chat.completions)
   # pdf_vision_max_pages: 40
   # pdf_vision_pages_per_request: 2  # сколько страниц за один vision-запрос

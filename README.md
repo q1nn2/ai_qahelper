@@ -79,19 +79,21 @@ export OPENAI_API_KEY=sk-...
 
 AI QAHelper — локальный AI QA ассистент, который помогает тестировщику готовить тестовую документацию по требованиям или по фактическому сайту без требований.
 
-Он умеет читать требования из файлов и URL, анализировать сайт без требований, генерировать test cases и checklists, удалять дубли, проверять качество документации и экспортировать результаты в XLSX/CSV/JSON.
+Он умеет читать требования из файлов и URL, анализировать сайт без требований, coverage-first генерировать test cases и checklists, удалять дубли, проверять покрытие/качество документации и экспортировать результаты в XLSX/CSV/JSON.
 
 Это не замена тестировщика и не полностью автономный AI, а помощник для ускорения QA analysis и test design. Результаты требуют QA review.
 
 ## Основные возможности
 
 - Natural language chat.
+- Workflow UI: `Project Setup`, карточки coverage-first генерации, отдельный `Coverage` dashboard.
 - Agent Memory для продолжения текущей QA-сессии.
 - Requirements ingestion: `.md`, `.txt`, `.pdf`, `.docx`, `.xlsx`, `.xls`, URL.
 - DOCX: текст, таблицы и изображения через vision.
 - Site Discovery Mode для сайта без требований.
-- Генерация test cases и checklists.
+- Coverage-first генерация test cases и checklists: пользователь не задаёт количество проверок, агент сам определяет нужный объём по требованиям и test conditions.
 - Локальная deduplication без LLM.
+- `coverage-report.json` с покрытием требований, test conditions и gaps/risks.
 - Documentation Quality Gate без LLM.
 - XLSX/CSV/JSON exports.
 - Optional Playwright/pytest starter tests.
@@ -190,7 +192,7 @@ AI QAHelper: Покажу путь к report и краткую JSON-сводку
 AI QAHelper: Создам Playwright/pytest starter tests без запуска.
 ```
 
-После успешного действия интерфейс показывает блок "Что можно сделать дальше": negative cases, чек-лист, bug reports, autotests, export или quality report. Для созданных JSON/Markdown/CSV/XLSX файлов отображаются путь и кнопка скачивания, а для Markdown/JSON ещё и короткий preview.
+После успешного действия интерфейс показывает блок "Что можно сделать дальше": negative cases, чек-лист, bug reports, autotests, export или quality report. Coverage metrics доступны на вкладках `Dashboard` и `Coverage`. Для созданных JSON/Markdown/CSV/XLSX файлов отображаются путь и кнопка скачивания, а для Markdown/JSON ещё и короткий preview.
 
 ## Что будет на выходе
 
@@ -201,6 +203,7 @@ AI QAHelper: Создам Playwright/pytest starter tests без запуска.
 | `test-cases.xlsx` | Основной Excel-файл с тест-кейсами |
 | `checklist.xlsx` | Основной Excel-файл с чек-листом |
 | `input-coverage-report.json` | Что агент увидел во входных файлах |
+| `coverage-report.json` | Покрытие требований/test conditions итоговой документацией и gaps |
 | `dedup-report.json` | Какие дубли были удалены |
 | `test-cases-quality-report.json` | Оценка качества тест-кейсов |
 | `checklist-quality-report.json` | Оценка качества чек-листа |

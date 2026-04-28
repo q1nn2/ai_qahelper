@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from ai_qahelper.config import load_config
+from ai_qahelper.coverage import build_coverage_report, coverage_needs_more_cases
 from ai_qahelper.deduplication import deduplicate_test_cases
 from ai_qahelper.documentation_quality import (
     apply_quality_marks_to_checklist,
@@ -15,7 +16,14 @@ from ai_qahelper.documentation_quality import (
 )
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.logging_utils import configure_logging
-from ai_qahelper.models import BugReport, SessionState, TestAnalysisReport, TestCase, UnifiedRequirementModel
+from ai_qahelper.models import (
+    BugReport,
+    ChecklistItem,
+    SessionState,
+    TestAnalysisReport,
+    TestCase,
+    UnifiedRequirementModel,
+)
 from ai_qahelper.quality import check_consistency
 from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local, save_json
 from ai_qahelper.session_service import load_session, retry_attempts, save_session, session_path
@@ -58,6 +66,30 @@ def _focused_prefix(base_prefix: str, focus: str) -> str:
     return base_prefix if focus == "general" else f"{base_prefix}-{focus}"
 
 
+def _ensure_test_case_source_refs(test_cases: list[TestCase], model: UnifiedRequirementModel) -> list[TestCase]:
+    fallback_refs = _fallback_source_refs(model)
+    return [
+        case if case.source_refs else case.model_copy(update={"source_refs": fallback_refs})
+        for case in test_cases
+    ]
+
+
+def _ensure_checklist_source_refs(checklist: list[ChecklistItem], model: UnifiedRequirementModel) -> list[ChecklistItem]:
+    fallback_refs = _fallback_source_refs(model)
+    return [
+        item if item.source_refs else item.model_copy(update={"source_refs": fallback_refs})
+        for item in checklist
+    ]
+
+
+def _fallback_source_refs(model: UnifiedRequirementModel) -> list[str]:
+    if len(model.requirements) == 1:
+        return ["REQ-001", model.requirements[0].source]
+    if model.requirements:
+        return [req.source for req in model.requirements[:3]]
+    return [str(model.target_url)]
+
+
 def generate_docs(
     session_id: str,
     max_cases: int | None = None,
@@ -76,10 +108,6 @@ def generate_docs(
     consistency = check_consistency(unified)
     consistency_json = sdir / "consistency-report.json"
     save_json(consistency_json, consistency)
-
-    n_items = max_cases if max_cases is not None else cfg.llm.max_test_cases
-    max_default = 100 if artifact_type == "testcases" else 200
-    n_items = max(1, min(n_items, max_default))
 
     err_path = sdir / "llm-generation-errors.log"
     run_analysis = cfg.generate_test_analysis and skip_test_analysis is not True
@@ -113,7 +141,6 @@ def generate_docs(
                     consistency_report=consistency,
                     llm_cfg=cfg.llm,
                     analysis=analysis if run_analysis and analysis is not None else fallback_test_analysis(unified, consistency),
-                    max_items=n_items,
                     focus=focus,
                     template=checklist_template,
                 ),
@@ -122,7 +149,16 @@ def generate_docs(
             logger.exception("generate_checklist failed, using fallback")
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_checklist:\n{type(exc).__name__}: {exc}\n")
-            checklist = fallback_checklist(unified, max_items=n_items)
+            checklist = fallback_checklist(unified)
+        checklist = _ensure_checklist_source_refs(checklist, unified)
+        coverage_report = build_coverage_report(
+            unified,
+            analysis if analysis is not None else None,
+            checklist,
+            dedup_report=None,
+        )
+        coverage_json = sdir / _focused_name("coverage-report.json", focus)
+        save_json(coverage_json, coverage_report)
         quality_report = evaluate_checklist_items(checklist, template=checklist_template)
         checklist = apply_quality_marks_to_checklist(checklist, quality_report)
         checklist_json = sdir / _focused_name("checklist.json", focus)
@@ -131,6 +167,7 @@ def generate_docs(
         save_json(quality_json, quality_report)
         export_checklist_local(sdir, checklist, filename_prefix=_focused_prefix("checklist", focus), template=checklist_template)
         state.checklist_path = str(checklist_json)
+        state.coverage_report_path = str(coverage_json)
         state.quality_report_path = str(quality_json)
         state.test_cases_path = None
         state.dedup_report_path = None
@@ -143,7 +180,6 @@ def generate_docs(
                     llm,
                     unified,
                     consistency_report=consistency,
-                    max_cases=n_items,
                     llm_cfg=cfg.llm,
                     export_columns=cfg.test_cases_export,
                     analysis=analysis if run_analysis else None,
@@ -155,10 +191,42 @@ def generate_docs(
             logger.exception("generate_test_cases failed, using fallback")
             with err_path.open("a", encoding="utf-8") as f:
                 f.write(f"\ngenerate_test_cases:\n{type(exc).__name__}: {exc}\n")
-            test_cases = fallback_test_cases(unified, max_cases=n_items)
+            test_cases = fallback_test_cases(unified)
+        test_cases = _ensure_test_case_source_refs(test_cases, unified)
         test_cases, dedup_report = deduplicate_test_cases(test_cases)
+        coverage_report = build_coverage_report(unified, analysis, test_cases, dedup_report=dedup_report)
+        for _ in range(2):
+            if not coverage_needs_more_cases(coverage_report):
+                break
+            try:
+                missing_cases = retry_attempts(
+                    2,
+                    lambda: generate_test_cases(
+                        llm,
+                        unified,
+                        consistency_report=consistency,
+                        llm_cfg=cfg.llm,
+                        export_columns=cfg.test_cases_export,
+                        analysis=analysis if run_analysis else None,
+                        focus=focus,
+                        template=test_cases_template,
+                        coverage_gap_report=coverage_report,
+                    ),
+                )
+            except Exception as exc:
+                logger.exception("generate_test_cases coverage backfill failed, keeping gaps in report")
+                with err_path.open("a", encoding="utf-8") as f:
+                    f.write(f"\ngenerate_test_cases_coverage_backfill:\n{type(exc).__name__}: {exc}\n")
+                break
+            if not missing_cases:
+                break
+            test_cases = _ensure_test_case_source_refs([*test_cases, *missing_cases], unified)
+            test_cases, dedup_report = deduplicate_test_cases(test_cases)
+            coverage_report = build_coverage_report(unified, analysis, test_cases, dedup_report=dedup_report)
         dedup_json = sdir / _focused_name("dedup-report.json", focus)
+        coverage_json = sdir / _focused_name("coverage-report.json", focus)
         save_json(dedup_json, dedup_report)
+        save_json(coverage_json, coverage_report)
         quality_report = evaluate_test_cases(test_cases, template=test_cases_template)
         test_cases = apply_quality_marks_to_test_cases(test_cases, quality_report)
         if do_bugs:
@@ -195,6 +263,7 @@ def generate_docs(
 
         state.test_cases_path = str(test_cases_json)
         state.dedup_report_path = str(dedup_json)
+        state.coverage_report_path = str(coverage_json)
         state.quality_report_path = str(quality_json)
         state.bug_reports_path = str(bugs_json)
         state.checklist_path = None

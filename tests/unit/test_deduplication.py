@@ -23,14 +23,13 @@ def _case(
     )
 
 
-def test_deduplicate_removes_same_title() -> None:
+def test_deduplicate_keeps_same_title_with_different_expected_result() -> None:
     cases = [_case("TC-001", "Логин", "Успех"), _case("TC-002", "Логин", "Ошибка")]
 
     unique, report = deduplicate_test_cases(cases)
 
-    assert len(unique) == 1
-    assert report["removed"] == 1
-    assert report["items"][0]["reason"] == "same_title"
+    assert len(unique) == 2
+    assert report["removed"] == 0
 
 
 def test_deduplicate_removes_same_title_expected() -> None:
@@ -100,4 +99,36 @@ def test_deduplicate_renumbers_and_merges_refs_and_note() -> None:
                 "similarity": 1.0,
             }
         ],
+        "duplicate_groups": [
+            {
+                "duplicate_group_id": "DUP-001",
+                "kept_case_id": "TC-010",
+                "reason": "same_title_expected",
+                "removed_case_ids": ["TC-020"],
+            }
+        ],
     }
+
+
+def test_deduplicate_keeps_distinct_boundary_values() -> None:
+    cases = [
+        _case("TC-001", "Граница длины пароля", "Пароль принят", ["Ввести пароль длиной 8 символов"], note="COND-001"),
+        _case("TC-002", "Граница длины пароля", "Пароль принят", ["Ввести пароль длиной 64 символа"], note="COND-002"),
+    ]
+
+    unique, report = deduplicate_test_cases(cases)
+
+    assert len(unique) == 2
+    assert report["removed"] == 0
+
+
+def test_deduplicate_keeps_distinct_negative_reasons() -> None:
+    cases = [
+        _case("TC-001", "Ошибка при невалидном Email", "Показана ошибка", ["Ввести email без @: 'user.example.com'"]),
+        _case("TC-002", "Ошибка при невалидном Email", "Показана ошибка", ["Ввести email с пустым доменом: 'user@'"]),
+    ]
+
+    unique, report = deduplicate_test_cases(cases)
+
+    assert len(unique) == 2
+    assert report["removed"] == 0

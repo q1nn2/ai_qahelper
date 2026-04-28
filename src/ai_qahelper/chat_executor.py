@@ -41,6 +41,7 @@ def collect_artifact_paths(results: list[dict]) -> list[str]:
     keys = [
         "unified_model_path",
         "input_coverage_report_path",
+        "coverage_report_path",
         "consistency_report_path",
         "test_analysis_path",
         "quality_report_path",
@@ -83,6 +84,23 @@ def _related_export_paths(path: str) -> list[str]:
     ]
 
 
+def _attach_coverage_summary(data: dict) -> None:
+    coverage_path = data.get("coverage_report_path")
+    if not coverage_path or not Path(coverage_path).is_file():
+        return
+    coverage = json.loads(Path(coverage_path).read_text(encoding="utf-8"))
+    summary = dict(data.get("summary") or {})
+    summary.update(coverage.get("summary") or {})
+    if data.get("test_cases_path") and Path(data["test_cases_path"]).is_file():
+        summary["test_cases"] = len(json.loads(Path(data["test_cases_path"]).read_text(encoding="utf-8")))
+    if data.get("dedup_report_path") and Path(data["dedup_report_path"]).is_file():
+        dedup = json.loads(Path(data["dedup_report_path"]).read_text(encoding="utf-8"))
+        summary["created_test_cases"] = dedup.get("before", summary.get("test_cases"))
+    if data.get("checklist_path") and Path(data["checklist_path"]).is_file():
+        summary["checklist_items"] = len(json.loads(Path(data["checklist_path"]).read_text(encoding="utf-8")))
+    data["summary"] = summary
+
+
 def _handle_help(context: Any, action: PlanAction, user_message: str) -> dict:
     return {"action": action.type, "title": "Справка"}
 
@@ -101,11 +119,11 @@ def _handle_agent_run(context: Any, action: PlanAction, user_message: str) -> di
         requirement_urls,
         context.figma_file_key,
         target_url=context.target_url,
-        max_cases=action.max_cases or context.max_cases,
         with_bug_drafts=context.with_bug_drafts,
         skip_test_analysis=True if context.skip_test_analysis else None,
         artifact_type=artifact_type,
     )
+    _attach_coverage_summary(data)
     data["action"] = action.type
     data["title"] = _action_title(action)
     return data
@@ -138,13 +156,13 @@ def _handle_generate_docs(context: Any, action: PlanAction, user_message: str) -
     context.output = artifact_type
     state = generate_docs(
         context.session_id,
-        max_cases=action.max_cases or context.max_cases,
         generate_bug_templates=True if context.with_bug_drafts else None,
         skip_test_analysis=True if context.skip_test_analysis else None,
         artifact_type=artifact_type,
         focus=action.focus,
     )
     data = state.model_dump(mode="json")
+    _attach_coverage_summary(data)
     data["action"] = action.type
     data["title"] = _action_title(action)
     return data

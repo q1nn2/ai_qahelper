@@ -67,7 +67,9 @@ class LlmConfig(BaseModel):
     max_requirement_chars_per_source: int = 0
     # 0 = отдавать в LLM все findings консистентности; >0 — только первые N.
     max_consistency_findings: int = 0
-    max_test_cases: int = 30
+    # Deprecated compatibility knob. Test documentation is generated coverage-first,
+    # not by asking the model for a fixed number of checks.
+    max_test_cases: int | None = None
     # 0 = не урезать JSON тест-анализа во втором промпте; >0 — лимит символов.
     max_analysis_json_chars: int = 0
     request_timeout_seconds: float = 600.0
@@ -240,6 +242,7 @@ class SessionState(BaseModel):
     consistency_report_path: str | None = None
     test_analysis_path: str | None = None
     input_coverage_report_path: str | None = None
+    coverage_report_path: str | None = None
     quality_report_path: str | None = None
     checklist_path: str | None = None
     test_cases_path: str | None = None

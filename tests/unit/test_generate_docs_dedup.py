@@ -75,9 +75,14 @@ def test_generate_docs_deduplicates_before_saving_and_export(monkeypatch, tmp_pa
 
     saved_cases = json.loads(Path(result.test_cases_path).read_text(encoding="utf-8"))
     dedup_report = json.loads(Path(result.dedup_report_path).read_text(encoding="utf-8"))
+    coverage_report = json.loads(Path(result.coverage_report_path).read_text(encoding="utf-8"))
     assert len(saved_cases) == 1
     assert saved_cases[0]["case_id"] == "TC-001"
     assert saved_cases[0]["source_refs"] == ["REQ-1", "REQ-2"]
     assert dedup_report["before"] == 2
     assert dedup_report["after"] == 1
     assert dedup_report["removed"] == 1
+    assert dedup_report["duplicate_groups"][0]["removed_case_ids"] == ["TC-002"]
+    assert Path(result.coverage_report_path).name == "coverage-report.json"
+    assert coverage_report["summary"]["requirements_total"] == 1
+    assert coverage_report["summary"]["requirements_covered"] == 1

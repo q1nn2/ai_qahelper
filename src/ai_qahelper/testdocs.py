@@ -77,9 +77,9 @@ def _normalize_bug_reports(raw_items: list[dict[str, Any]], max_items: int) -> l
     return items
 
 
-def _normalize_checklist(items: list[ChecklistItem], max_items: int) -> list[ChecklistItem]:
+def _normalize_checklist(items: list[ChecklistItem]) -> list[ChecklistItem]:
     normalized: list[ChecklistItem] = []
-    for idx, item in enumerate(items[:max_items], start=1):
+    for idx, item in enumerate(items, start=1):
         item_id = item.item_id.strip() or f"CL-{idx:03d}"
         area = item.area.strip()
         check = item.check.strip()
@@ -246,7 +246,7 @@ def generate_checklist(
     llm: LlmClient,
     model: UnifiedRequirementModel,
     consistency_report: dict[str, Any] | None = None,
-    max_items: int = 30,
+    max_items: int | None = None,
     *,
     llm_cfg: LlmConfig,
     analysis: TestAnalysisReport | None = None,
@@ -269,8 +269,11 @@ def generate_checklist(
         "Never use vague QA filler phrases."
     )
     user_parts = [
-        f"Сгенерируй ровно {max_items} пунктов чек-листа (не меньше и не больше).",
+        "Сначала проанализируй требования и test_conditions, затем создай столько пунктов чек-листа, сколько необходимо для полного покрытия.",
+        "Не используй искусственное фиксированное количество пунктов и не создавай дубли.",
         "Один пункт = одна конкретная проверка одного элемента/правила/состояния. Не превращай чек-лист в пошаговый тест-кейс.",
+        "Покрой все функции, правила валидации, основные UI-состояния, негативные проверки и граничные значения, если они есть в требованиях.",
+        "Если требование невозможно покрыть из-за недостатка информации, явно укажи gap/risk в note.",
         "В check — краткая формулировка проверки для исполнителя. В expected_result — конкретный наблюдаемый итог этой проверки.",
         "Расставь priority по важности: low / medium / high / critical.",
         "Каждый item должен иметь source_refs. Если данных не хватает, укажи gap/risk в note, не придумывай правило.",
@@ -296,20 +299,21 @@ def generate_checklist(
     )
     user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
     payload = llm.complete_json(system, "\n".join(user_parts), ChecklistList, root_list_key="checklist")
-    return _normalize_checklist(payload.checklist, max_items)
+    return _normalize_checklist(payload.checklist)
 
 
 def generate_test_cases(
     llm: LlmClient,
     model: UnifiedRequirementModel,
     consistency_report: dict[str, Any] | None = None,
-    max_cases: int = 30,
+    max_cases: int | None = None,
     *,
     llm_cfg: LlmConfig,
     export_columns: list[TestCaseExportColumn] | None = None,
     analysis: TestAnalysisReport | None = None,
     focus: str = "general",
     template: DocumentationTemplate | None = None,
+    coverage_gap_report: dict[str, Any] | None = None,
 ) -> list[TestCase]:
     class Payload(BaseModel):
         test_cases: list[TestCase]
@@ -328,7 +332,8 @@ def generate_test_cases(
         "environment, status, and bug_report_id MUST be empty strings. "
         "Steps must be concrete, executable, and atomic. One test case = one verification. "
         "Every test case must be understandable for manual execution and suitable for future automation. "
-        "Do not invent business rules that are absent from requirements, site model, analysis, or consistency findings."
+        "Do not invent business rules that are absent from requirements, site model, analysis, or consistency findings. "
+        "Stop only when all requirements and test_conditions are covered."
     )
     if analysis is not None and analysis.test_conditions:
         system += (
@@ -336,8 +341,10 @@ def generate_test_cases(
         )
 
     user_parts = [
-        f"Сгенерируй ровно {max_cases} различных тест-кейсов (не меньше и не больше).",
-        "Строгий QA-standard: каждый кейс проверяет ровно одну конкретную вещь (одно значение, одно правило, одно сообщение, одно состояние) — не склеивай проверки.",
+        "Сначала проанализируй требования и разбей их на атомарные test conditions.",
+        "Сгенерируй столько тест-кейсов, сколько необходимо для полного покрытия всех требований, test_conditions, позитивных, негативных и граничных сценариев.",
+        "Не используй искусственное фиксированное количество и не создавай дубли.",
+        "Строгий QA-standard: каждый кейс проверяет одну конкретную вещь (одно значение, одно правило, одно сообщение, одно состояние) — не склеивай проверки.",
         "Название должно содержать конкретный объект проверки, не «Проверка формы» и не «Проверка функциональности».",
         "Предусловия должны быть конкретными: где находится пользователь, какое состояние/данные уже подготовлены.",
         "Шаги должны быть конкретными и исполнимыми. Если есть ввод, укажи конкретные тестовые данные.",
@@ -345,7 +352,8 @@ def generate_test_cases(
         "Если точный текст ошибки неизвестен, пиши: «отображается сообщение об ошибке о причине невалидного значения», не выдумывай точную строку.",
         "Для negative cases указывай конкретное невалидное значение. Для boundary cases указывай конкретную границу только если она есть в требованиях.",
         "Если данных не хватает — добавляй gap/risk в note, а не придумывай правило.",
-        "Каждый кейс должен иметь source_refs. Для Site Discovery case в note укажи, что кейс основан на фактически найденном UI, а не на продуктовых требованиях.",
+        "Каждый кейс должен иметь source_refs: ссылку на требование, файл, URL или COND-xx.",
+        "Для Site Discovery case в note укажи, что кейс основан на фактически найденном UI, а не на продуктовых требованиях.",
         _BAD_QA_PHRASES,
         "Все формулировки для исполнителя — на русском языке.",
         "Поля environment, status и bug_report_id оставь пустыми строками \"\".",
@@ -366,12 +374,17 @@ def generate_test_cases(
     else:
         user_parts.append("Покрывай валидацию, основные сценарии и граничные случаи по unified model.")
         user_parts.append("source_refs: пути к источникам или намёк на раздел из unified model.")
+    if coverage_gap_report is not None:
+        user_parts.append(
+            "Coverage gaps после дедупликации (сгенерируй только недостающие проверки, не повторяй уже покрытые):\n"
+            + json.dumps(coverage_gap_report, ensure_ascii=False, indent=2)
+        )
 
     user_parts.append(_export_template_hint(export_columns, template))
     user_parts.append("Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings))
     user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
     payload = llm.complete_json(system, "\n".join(user_parts), Payload, root_list_key="test_cases")
-    return [_clear_executor_columns(tc) for tc in payload.test_cases[:max_cases]]
+    return [_clear_executor_columns(tc) for tc in payload.test_cases]
 
 
 def generate_bug_report_templates(
@@ -400,10 +413,9 @@ def generate_bug_report_templates(
     return _normalize_bug_reports(payload.bug_reports, max_items)
 
 
-def fallback_checklist(model: UnifiedRequirementModel, max_items: int = 30) -> list[ChecklistItem]:
+def fallback_checklist(model: UnifiedRequirementModel, max_items: int | None = None) -> list[ChecklistItem]:
     items: list[ChecklistItem] = []
-    cap = max(1, min(max_items, 50))
-    for idx, req in enumerate(model.requirements[:cap], start=1):
+    for idx, req in enumerate(model.requirements, start=1):
         refs = [req.source]
         if model.design:
             refs.append(f"figma:{model.design.file_key}")
@@ -433,15 +445,14 @@ def fallback_checklist(model: UnifiedRequirementModel, max_items: int = 30) -> l
     return items
 
 
-def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> list[TestCase]:
+def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int | None = None) -> list[TestCase]:
     items: list[TestCase] = []
     base_steps = [
         f"Открыть в браузере URL: {model.target_url}",
         "Убедиться, что страница загрузилась без ошибок",
         "Проверить по требованиям видимость ключевых элементов интерфейса",
     ]
-    cap = max(1, min(max_cases, 50))
-    for i, req in enumerate(model.requirements[:cap], start=1):
+    for i, req in enumerate(model.requirements, start=1):
         figma_ref = f"figma:{model.design.file_key}" if model.design else None
         refs = [req.source]
         if figma_ref:
@@ -458,6 +469,21 @@ def fallback_test_cases(model: UnifiedRequirementModel, max_cases: int = 30) -> 
                 bug_report_id="",
                 note="Черновик без ответа LLM (резервный режим)",
                 source_refs=refs,
+            )
+        )
+    if not items:
+        items.append(
+            TestCase(
+                case_id="TC-001",
+                title="Доступность тестируемого стенда",
+                preconditions="Приложение доступно по URL стенда",
+                steps=base_steps,
+                expected_result="Страница открывается без критических ошибок",
+                environment="",
+                status="",
+                bug_report_id="",
+                note="Черновик без ответа LLM (резервный режим); requirements отсутствуют, это gap/risk.",
+                source_refs=[str(model.target_url)],
             )
         )
     return items

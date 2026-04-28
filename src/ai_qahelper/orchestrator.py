@@ -79,6 +79,7 @@ def agent_run(
         "session_id": session_id,
         "unified_model_path": state.unified_model_path,
         "input_coverage_report_path": state.input_coverage_report_path,
+        "coverage_report_path": state.coverage_report_path,
         "consistency_report_path": state.consistency_report_path,
         "test_analysis_path": state.test_analysis_path,
         "quality_report_path": state.quality_report_path,
@@ -93,6 +94,12 @@ def agent_run(
         result["summary"]["checklist_items"] = len(json.loads(Path(state.checklist_path).read_text(encoding="utf-8")))
     elif state.test_cases_path:
         result["summary"]["test_cases"] = len(json.loads(Path(state.test_cases_path).read_text(encoding="utf-8")))
+    if state.dedup_report_path:
+        dedup = json.loads(Path(state.dedup_report_path).read_text(encoding="utf-8"))
+        result["summary"]["created_test_cases"] = dedup.get("before", result["summary"].get("test_cases"))
+    if state.coverage_report_path:
+        coverage = json.loads(Path(state.coverage_report_path).read_text(encoding="utf-8"))
+        result["summary"].update(coverage.get("summary") or {})
     if out_dir:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
