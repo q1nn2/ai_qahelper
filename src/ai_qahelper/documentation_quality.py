@@ -94,6 +94,22 @@ _WEAK_AUTOMATION_PHRASES = (
     "проверить красиво",
     "оценить удобство",
 )
+_POSITIVE_FLOW_MARKERS = ("успеш", "создан", "сохран", "открыт", "доступен", "переход")
+_NEGATIVE_FLOW_MARKERS = ("ошиб", "невалид", "пуст", "запрещ", "нельзя", "отклон", "недопуст")
+_BOUNDARY_FLOW_MARKERS = ("boundary", "границ", "миним", "максим", "лимит", "длина", "больше", "меньше")
+_OBSERVABLE_EXPECTED_MARKERS = (
+    "отображ",
+    "сообщ",
+    "статус",
+    "сохран",
+    "создан",
+    "открыт",
+    "перенаправ",
+    "заблок",
+    "неактив",
+    "ошиб",
+    "доступ",
+)
 
 _PENALTIES = {
     "required_fields": 40,
@@ -105,6 +121,9 @@ _PENALTIES = {
     "missing_test_data": 15,
     "missing_source_refs": 10,
     "missing_priority": 10,
+    "mixed_positive_negative": 15,
+    "missing_boundary_value": 15,
+    "non_observable_expected_result": 15,
     "possible_invented_requirement": 20,
     "automation_weakness": 10,
 }
@@ -189,6 +208,12 @@ def _test_case_issues(test_case: TestCase, template: DocumentationTemplate | Non
         issues.append("insufficient_steps")
     if _has_multiple_checks(joined):
         issues.append("multiple_checks")
+    if _mixes_positive_negative(" ".join([title, expected])):
+        issues.append("mixed_positive_negative")
+    if _missing_boundary_value(joined):
+        issues.append("missing_boundary_value")
+    if _non_observable_expected(expected):
+        issues.append("non_observable_expected_result")
     if _missing_test_data(joined):
         issues.append("missing_test_data")
     if _should_check_column(template, "source_refs") and not test_case.source_refs:
@@ -213,6 +238,12 @@ def _checklist_issues(item: ChecklistItem, template: DocumentationTemplate | Non
         issues.append("vague_check")
     if _is_vague_expected(expected):
         issues.append("vague_expected_result")
+    if _mixes_positive_negative(joined):
+        issues.append("mixed_positive_negative")
+    if _missing_boundary_value(joined):
+        issues.append("missing_boundary_value")
+    if _non_observable_expected(expected):
+        issues.append("non_observable_expected_result")
     if _should_check_column(template, "source_refs") and not item.source_refs:
         issues.append("missing_source_refs")
     if _should_check_column(template, "priority") and not item.priority:
@@ -340,6 +371,26 @@ def _missing_test_data(text: str) -> bool:
     if quoted_values:
         return False
     return "невалид" in text or "валид" in text or "ввести" in text or "заполнить" in text
+
+
+def _mixes_positive_negative(text: str) -> bool:
+    has_positive = any(marker in text for marker in _POSITIVE_FLOW_MARKERS)
+    has_negative = any(marker in text for marker in _NEGATIVE_FLOW_MARKERS)
+    if not has_positive or not has_negative:
+        return False
+    return any(separator in text for separator in (" и ", " а также ", " затем ", "после этого"))
+
+
+def _missing_boundary_value(text: str) -> bool:
+    if not any(marker in text for marker in _BOUNDARY_FLOW_MARKERS):
+        return False
+    return not (_NUMBER_RE.search(text) or any(token in text for token in ("min", "max", "null", "empty", "пуст")))
+
+
+def _non_observable_expected(expected: str) -> bool:
+    if not expected or _is_vague_expected(expected):
+        return False
+    return not any(marker in expected for marker in _OBSERVABLE_EXPECTED_MARKERS)
 
 
 def _possible_invented_requirement(text: str, source_refs: list[str], note: str) -> bool:

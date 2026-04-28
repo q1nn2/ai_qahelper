@@ -240,9 +240,14 @@ class SessionState(BaseModel):
     exploratory_report_md_path: str | None = None
     unified_model_path: str | None = None
     consistency_report_path: str | None = None
+    requirements_classification_path: str | None = None
+    requirements_review_path: str | None = None
+    requirements_review_md_path: str | None = None
     test_analysis_path: str | None = None
     input_coverage_report_path: str | None = None
     coverage_report_path: str | None = None
+    traceability_matrix_path: str | None = None
+    traceability_matrix_xlsx_path: str | None = None
     quality_report_path: str | None = None
     checklist_path: str | None = None
     test_cases_path: str | None = None

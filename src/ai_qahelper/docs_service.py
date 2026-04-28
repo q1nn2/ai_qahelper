@@ -24,6 +24,13 @@ from ai_qahelper.models import (
     TestCase,
     UnifiedRequirementModel,
 )
+from ai_qahelper.qa_analysis import (
+    build_requirements_classification,
+    build_requirements_review,
+    build_traceability_matrix,
+    export_traceability_matrix_xlsx,
+    render_requirements_review_markdown,
+)
 from ai_qahelper.quality import check_consistency
 from ai_qahelper.reporting import export_bug_reports_local, export_checklist_local, export_test_cases_local, save_json
 from ai_qahelper.session_service import load_session, retry_attempts, save_session, session_path
@@ -90,6 +97,52 @@ def _fallback_source_refs(model: UnifiedRequirementModel) -> list[str]:
     return [str(model.target_url)]
 
 
+def _save_requirements_analysis_artifacts(
+    sdir: Path,
+    state: SessionState,
+    unified: UnifiedRequirementModel,
+    consistency: dict,
+    analysis: TestAnalysisReport | None,
+) -> tuple[dict, dict]:
+    classification = build_requirements_classification(unified)
+    review = build_requirements_review(unified, classification, consistency_report=consistency, analysis=analysis)
+    classification_json = sdir / "requirements-classification.json"
+    review_json = sdir / "requirements-review.json"
+    review_md = sdir / "requirements-review.md"
+    save_json(classification_json, classification)
+    save_json(review_json, review)
+    review_md.write_text(render_requirements_review_markdown(review), encoding="utf-8")
+    state.requirements_classification_path = str(classification_json)
+    state.requirements_review_path = str(review_json)
+    state.requirements_review_md_path = str(review_md)
+    return classification, review
+
+
+def _save_traceability_artifacts(
+    sdir: Path,
+    state: SessionState,
+    unified: UnifiedRequirementModel,
+    analysis: TestAnalysisReport | None,
+    items: list[TestCase] | list[ChecklistItem],
+    classification: dict,
+    requirements_review: dict,
+    focus: str,
+) -> None:
+    matrix = build_traceability_matrix(
+        unified,
+        analysis,
+        list(items),
+        classification,
+        requirements_review,
+    )
+    matrix_json = sdir / _focused_name("traceability-matrix.json", focus)
+    matrix_xlsx = sdir / _focused_name("traceability-matrix.xlsx", focus)
+    save_json(matrix_json, matrix)
+    export_traceability_matrix_xlsx(matrix_xlsx, matrix)
+    state.traceability_matrix_path = str(matrix_json)
+    state.traceability_matrix_xlsx_path = str(matrix_xlsx)
+
+
 def generate_docs(
     session_id: str,
     max_cases: int | None = None,
@@ -127,6 +180,14 @@ def generate_docs(
         save_json(analysis_json, analysis.model_dump(mode="json"))
         state.test_analysis_path = str(analysis_json)
 
+    classification, requirements_review = _save_requirements_analysis_artifacts(
+        sdir,
+        state,
+        unified,
+        consistency,
+        analysis,
+    )
+
     bug_templates: list[BugReport] = []
     test_cases_template = load_active_template("test_cases", session_id)
     checklist_template = load_active_template("checklist", session_id)
@@ -159,6 +220,16 @@ def generate_docs(
         )
         coverage_json = sdir / _focused_name("coverage-report.json", focus)
         save_json(coverage_json, coverage_report)
+        _save_traceability_artifacts(
+            sdir,
+            state,
+            unified,
+            analysis if analysis is not None else None,
+            checklist,
+            classification,
+            requirements_review,
+            focus,
+        )
         quality_report = evaluate_checklist_items(checklist, template=checklist_template)
         checklist = apply_quality_marks_to_checklist(checklist, quality_report)
         checklist_json = sdir / _focused_name("checklist.json", focus)
@@ -227,6 +298,16 @@ def generate_docs(
         coverage_json = sdir / _focused_name("coverage-report.json", focus)
         save_json(dedup_json, dedup_report)
         save_json(coverage_json, coverage_report)
+        _save_traceability_artifacts(
+            sdir,
+            state,
+            unified,
+            analysis,
+            test_cases,
+            classification,
+            requirements_review,
+            focus,
+        )
         quality_report = evaluate_test_cases(test_cases, template=test_cases_template)
         test_cases = apply_quality_marks_to_test_cases(test_cases, quality_report)
         if do_bugs:

@@ -14,8 +14,11 @@ runs/<session_id>/
 |------|----------|
 | `session.json` | Метаданные сессии и пути к артефактам |
 | `unified-model.json` | Единая модель требований, дизайна и target URL |
+| `requirements-classification.json` | Классификация требований: functional, validation, UI, roles, integrations, unclear и др. |
+| `requirements-review.json` / `requirements-review.md` | QA review требований: gaps, ambiguities, missing validation/boundary rules и вопросы аналитику |
 | `input-coverage-report.json` | Что агент увидел во входных файлах |
 | `coverage-report.json` | Покрытие требований и test conditions итоговыми test cases/checklist, включая gaps/risks |
+| `traceability-matrix.json` / `traceability-matrix.xlsx` | Матрица REQ → test condition → test case/checklist item со статусами covered/partial/missing/unclear |
 | `consistency-report.json` | Эвристика пропусков, противоречий и неоднозначностей |
 | `test-analysis.json` | LLM test analysis и test conditions, если включён |
 | `test-cases.json` | Тест-кейсы в структурированном JSON |

@@ -79,7 +79,15 @@ def test_generate_docs_writes_test_case_quality_report(monkeypatch, tmp_path: Pa
 
     saved_cases = json.loads(Path(result.test_cases_path).read_text(encoding="utf-8"))
     quality_report = json.loads(Path(result.quality_report_path).read_text(encoding="utf-8"))
+    classification_report = json.loads(Path(result.requirements_classification_path).read_text(encoding="utf-8"))
+    requirements_review = json.loads(Path(result.requirements_review_path).read_text(encoding="utf-8"))
+    traceability = json.loads(Path(result.traceability_matrix_path).read_text(encoding="utf-8"))
     assert Path(result.quality_report_path).name == "test-cases-quality-report.json"
+    assert Path(result.requirements_review_md_path).is_file()
+    assert Path(result.traceability_matrix_xlsx_path).is_file()
+    assert classification_report["type"] == "requirements_classification"
+    assert requirements_review["type"] == "requirements_review"
+    assert traceability["type"] == "traceability_matrix"
     assert quality_report["type"] == "test_cases"
     assert quality_report["total"] == 2
     assert "Quality: ready" in saved_cases[0]["note"]
@@ -118,7 +126,10 @@ def test_generate_docs_writes_checklist_quality_report(monkeypatch, tmp_path: Pa
 
     saved_items = json.loads(Path(result.checklist_path).read_text(encoding="utf-8"))
     quality_report = json.loads(Path(result.quality_report_path).read_text(encoding="utf-8"))
+    traceability = json.loads(Path(result.traceability_matrix_path).read_text(encoding="utf-8"))
     assert Path(result.quality_report_path).name == "checklist-quality-report.json"
+    assert Path(result.traceability_matrix_xlsx_path).name == "traceability-matrix.xlsx"
+    assert traceability["type"] == "traceability_matrix"
     assert quality_report["type"] == "checklist"
     assert quality_report["total"] == 2
     assert "Quality: ready" in saved_items[0]["note"]
