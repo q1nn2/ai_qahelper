@@ -19,3 +19,5 @@ generated_tests/
 .pytest_cache/
 .coverage
 htmlcov/
+
+.tmp_training_sources/

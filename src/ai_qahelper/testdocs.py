@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ai_qahelper.knowledge_loader import load_knowledge_base
 from ai_qahelper.llm_client import LlmClient
 from ai_qahelper.models import (
     AnalysisTechnique,
@@ -201,6 +202,9 @@ def generate_test_analysis(
         f"Consistency (subset):\n{_consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)}\n"
         f"Unified model:\n{_model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source)}"
     )
+    knowledge = load_knowledge_base()
+    if knowledge:
+        user = user + "\n\n" + _KNOWLEDGE_CONTEXT + knowledge
     payload = llm.complete_json(system, user, TestAnalysisRoot)
     return payload.test_analysis
 
@@ -232,6 +236,14 @@ def _focus_instruction(focus: str) -> str:
         "accessibility": "Фокус: accessibility. Проверяй клавиатурную навигацию, labels, контрастность и screen reader сценарии.",
     }
     return hints.get(focus, "Фокус: general. Покрой требования сбалансированно.")
+
+
+_KNOWLEDGE_CONTEXT = (
+    "База знаний и эталонные QA-примеры пользователя. "
+    "Используй эти правила и стиль при генерации QA-документации. "
+    "Не копируй учебные названия проектов и не используй слово Sprint. "
+    "Если в источнике есть слово Sprint, замени его на нейтральное описание функциональности.\n"
+)
 
 
 _BAD_QA_PHRASES = (
@@ -298,6 +310,9 @@ def generate_checklist(
         "Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings)
     )
     user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
+    knowledge = load_knowledge_base()
+    if knowledge:
+        user_parts.append(_KNOWLEDGE_CONTEXT + knowledge)
     payload = llm.complete_json(system, "\n".join(user_parts), ChecklistList, root_list_key="checklist")
     return _normalize_checklist(payload.checklist)
 
@@ -383,6 +398,9 @@ def generate_test_cases(
     user_parts.append(_export_template_hint(export_columns, template))
     user_parts.append("Consistency (subset):\n" + _consistency_digest_for_prompt(consistency_report, llm_cfg.max_consistency_findings))
     user_parts.append("Unified model:\n" + _model_digest_for_prompt(model, llm_cfg.max_requirement_chars_per_source))
+    knowledge = load_knowledge_base()
+    if knowledge:
+        user_parts.append(_KNOWLEDGE_CONTEXT + knowledge)
     payload = llm.complete_json(system, "\n".join(user_parts), Payload, root_list_key="test_cases")
     return [_clear_executor_columns(tc) for tc in payload.test_cases]
 
@@ -408,6 +426,9 @@ def generate_bug_report_templates(
     if template is not None:
         user_parts.append(build_template_prompt_hint(template))
     user_parts.append(json.dumps([c.model_dump() for c in test_cases], ensure_ascii=False))
+    knowledge = load_knowledge_base()
+    if knowledge:
+        user_parts.append(_KNOWLEDGE_CONTEXT + knowledge)
     user = "\n".join(user_parts)
     payload = llm.complete_json(system, user, Payload, root_list_key="bug_reports")
     return _normalize_bug_reports(payload.bug_reports, max_items)
