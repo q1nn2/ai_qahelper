@@ -1,0 +1,22 @@
+{
+  "scope": "Веб-форма входа (демо-пример)",
+  "assumptions": "Иллюстративный фрагмент для sample-output.",
+  "sources_used": ["examples/minimal/requirements.md"],
+  "risks_and_gaps": ["Нет макета Figma в примере — покрытие UI по тексту."],
+  "inventory": ["Поля: Email, Пароль", "Кнопка: Войти"],
+  "techniques": [
+    {
+      "id": "TECH-01",
+      "name": "Эквивалентное разбиение",
+      "rationale": "Валидные / невалидные комбинации полей."
+    }
+  ],
+  "test_conditions": [
+    {
+      "id": "COND-01",
+      "description": "Пустой email → ошибка",
+      "technique_id": "TECH-01",
+      "requirement_ref": "При пустом email показывается сообщение об ошибке."
+    }
+  ]
+}

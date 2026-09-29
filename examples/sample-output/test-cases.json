@@ -1,0 +1,18 @@
+[
+  {
+    "case_id": "TC-001",
+    "title": "Пустой email — показ ошибки",
+    "preconditions": "Открыта страница входа https://example.com/login",
+    "steps": [
+      "Оставить поле «Email» пустым",
+      "Ввести в поле «Пароль» значение «secret»",
+      "Нажать кнопку «Войти»"
+    ],
+    "expected_result": "Отображается сообщение об ошибке для поля email; вход не выполняется.",
+    "environment": "",
+    "status": "",
+    "bug_report_id": "",
+    "note": "Негативный сценарий валидации.",
+    "source_refs": ["examples/minimal/requirements.md"]
+  }
+]
